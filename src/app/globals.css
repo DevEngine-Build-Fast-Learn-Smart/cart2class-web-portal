@@ -1,0 +1,24 @@
+@import url("https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700;800&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { @apply border-line; }
+  html { @apply bg-canvas text-[16px]; }
+  body { @apply min-h-screen bg-canvas font-sans text-ink antialiased; }
+  button, a, input, select, textarea { @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2; }
+}
+
+@layer components {
+  .page-shell { @apply mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10 space-y-6; }
+  .panel { @apply rounded-2xl border bg-white shadow-sm transition-shadow; }
+  .eyebrow { @apply text-xs font-bold uppercase tracking-[.18em] text-muted; }
+  .metric-value { @apply text-3xl sm:text-4xl font-black tracking-tight text-ink; }
+}
+
+@media (min-width: 1024px) {
+  .page-shell h1 { font-size: 2.5rem; line-height: 1.12; }
+  .page-shell h2 { font-size: 1.2rem; line-height: 1.35; }
+  .page-shell .text-sm { font-size: 0.95rem; line-height: 1.55; }
+}

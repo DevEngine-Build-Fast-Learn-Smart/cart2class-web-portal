@@ -1,0 +1,10 @@
+create index students_organization_idx on public.students(organization_id);
+create index students_class_idx on public.students(class_id);
+create index memberships_user_active_idx on public.role_memberships(user_id,is_active);
+create index assignments_class_status_idx on public.mission_assignments(class_id,status);
+create index attempts_student_idx on public.mission_attempts(student_id,completed_at desc);
+create index recordings_student_review_idx on public.reading_recordings(student_id,review_status);
+create index notifications_recipient_idx on public.notifications(recipient_user_id,read_at,created_at desc);
+create index reward_goals_store_status_idx on public.reward_goals(store_id,status);
+create index missions_organization_status_idx on public.missions(organization_id,status,sharing_status);
+create index audit_logs_organization_time_idx on public.audit_logs(organization_id,created_at desc);

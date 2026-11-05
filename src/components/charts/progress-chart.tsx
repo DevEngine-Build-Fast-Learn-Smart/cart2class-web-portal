@@ -1,0 +1,3 @@
+"use client";
+import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip } from "recharts";
+export function ProgressChart({ data }: { data: { name: string; completed: number; assigned: number }[] }) { return <div className="h-56 w-full"><ResponsiveContainer><BarChart data={data} barGap={4}><XAxis dataKey="name" tickLine={false} axisLine={false} fontSize={12} /><Tooltip cursor={{ fill: "#F8FAFC" }} /><Bar dataKey="completed" name="Completed" fill="#1D4ED8" radius={[5,5,0,0]} /><Bar dataKey="assigned" name="Assigned" fill="#BFDBFE" radius={[5,5,0,0]} /></BarChart></ResponsiveContainer></div>; }
