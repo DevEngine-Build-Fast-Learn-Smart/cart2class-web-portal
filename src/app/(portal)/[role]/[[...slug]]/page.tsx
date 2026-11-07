@@ -7,6 +7,8 @@ import { getDashboardData } from "@/features/dashboard/service";
 import { SectionView } from "@/features/dashboard/section-view";
 import { AdminSectionView } from "@/features/dashboard/admin-section-view";
 import { AdminManagementView } from "@/features/dashboard/admin-management-view";
+import { AdminReportsView } from "@/features/dashboard/admin-reports-view";
+import { AdminSettingsView } from "@/features/dashboard/admin-settings-view";
 import { StoreCheckinView } from "@/features/dashboard/store-checkin-view";
 import { AdminLegalView } from "@/features/legal/admin-legal-view";
 import { RoleSectionView } from "@/features/dashboard/role-section-view";
@@ -48,7 +50,7 @@ export default async function PortalPage({ params }: { params: Promise<{ role: s
     const data = await getDashboardData(supabase, role, access.profile.id);
     content = <DashboardView role={role} displayName={access.profile.display_name} {...data} />;
   } else if (role === "admin") {
-    if (["users", "schools", "stores"].includes(currentSlug)) {
+    if (["users", "schools", "stores", "reports"].includes(currentSlug)) {
       const [
         { data: profiles },
         { data: memberships },
@@ -115,17 +117,33 @@ export default async function PortalPage({ params }: { params: Promise<{ role: s
         enrolled_count: (students ?? []).filter((st) => st.class_id === c.id && st.is_active).length
       }));
 
-      content = (
-        <AdminManagementView
-          slug={currentSlug}
-          profiles={enrichedProfiles}
-          students={enrichedStudents}
-          schools={schools ?? []}
-          classes={enrichedClasses}
-          stores={stores ?? []}
-          rewards={rewards ?? []}
-        />
-      );
+      if (currentSlug === "reports") {
+        content = (
+          <AdminReportsView
+            schools={schools ?? []}
+            classes={enrichedClasses}
+            students={enrichedStudents}
+            stores={stores ?? []}
+            rewards={rewards ?? []}
+            profiles={enrichedProfiles}
+          />
+        );
+      } else {
+        content = (
+          <AdminManagementView
+            slug={currentSlug}
+            profiles={enrichedProfiles}
+            students={enrichedStudents}
+            schools={schools ?? []}
+            classes={enrichedClasses}
+            stores={stores ?? []}
+            rewards={rewards ?? []}
+          />
+        );
+      }
+    } else if (currentSlug === "settings") {
+      const { data: orgs } = await supabase.from("organizations").select("*").order("name");
+      content = <AdminSettingsView organizations={orgs ?? []} />;
     } else if (["legal", "deletion-requests", "audit-logs"].includes(currentSlug)) {
       content = <AdminLegalView slug={currentSlug as "legal" | "deletion-requests" | "audit-logs"} supabase={supabase} />;
     } else {

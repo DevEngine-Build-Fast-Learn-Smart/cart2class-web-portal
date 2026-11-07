@@ -56,6 +56,111 @@ import {
 
 type Row = Record<string, any>;
 
+function GradeLevelSelect({
+  name = "gradeLevel",
+  defaultValue = 0,
+  label = "Grade Level"
+}: {
+  name?: string;
+  defaultValue?: number | string;
+  label?: string;
+}) {
+  const [isCustom, setIsCustom] = useState(
+    Number(defaultValue) > 12 || (Number(defaultValue) < 0 && defaultValue !== "")
+  );
+  const [selectedVal, setSelectedVal] = useState<string>(String(defaultValue ?? 0));
+  const [customVal, setCustomVal] = useState<string>(String(defaultValue ?? ""));
+
+  const standardGrades = [
+    { value: "0", label: "Kindergarten (Grade 0)" },
+    { value: "1", label: "Grade 1" },
+    { value: "2", label: "Grade 2" },
+    { value: "3", label: "Grade 3" },
+    { value: "4", label: "Grade 4" },
+    { value: "5", label: "Grade 5" },
+    { value: "6", label: "Grade 6" },
+    { value: "7", label: "Grade 7" },
+    { value: "8", label: "Grade 8" },
+    { value: "9", label: "Grade 9" },
+    { value: "10", label: "Grade 10" },
+    { value: "11", label: "Grade 11" },
+    { value: "12", label: "Grade 12" }
+  ];
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold text-navy">{label}</span>
+        {!isCustom ? (
+          <button
+            type="button"
+            onClick={() => {
+              setIsCustom(true);
+              setCustomVal(selectedVal);
+            }}
+            className="text-[11px] font-bold text-brand hover:underline"
+          >
+            + Add New Grade
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setIsCustom(false);
+              const num = Number(customVal);
+              if (num >= 0 && num <= 12) setSelectedVal(String(num));
+              else setSelectedVal("0");
+            }}
+            className="text-[11px] font-bold text-muted hover:underline"
+          >
+            ← Select from list
+          </button>
+        )}
+      </div>
+
+      {!isCustom ? (
+        <select
+          name={name}
+          value={selectedVal}
+          onChange={(e) => {
+            if (e.target.value === "custom") {
+              setIsCustom(true);
+              setCustomVal("");
+            } else {
+              setSelectedVal(e.target.value);
+            }
+          }}
+          className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal text-slate-800"
+        >
+          {standardGrades.map((g) => (
+            <option key={g.value} value={g.value}>
+              {g.label}
+            </option>
+          ))}
+          <option value="custom" className="font-bold text-brand">
+            + Add New Grade Level...
+          </option>
+        </select>
+      ) : (
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            name={name}
+            min={0}
+            max={12}
+            value={customVal}
+            onChange={(e) => setCustomVal(e.target.value)}
+            placeholder="Enter grade number (0 to 12)"
+            autoFocus
+            required
+            className="mt-1 block h-10 w-full rounded-lg border-2 border-brand bg-white px-3 text-sm font-normal text-slate-800 focus:outline-hidden"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AdminManagementView({
   slug,
   profiles,
@@ -319,14 +424,7 @@ export function AdminManagementView({
                 Last Initial
                 <input maxLength={2} name="lastInitial" placeholder="e.g. C" className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal uppercase" />
               </label>
-              <label className="text-xs font-bold">
-                Grade Level
-                <select name="gradeLevel" defaultValue="0" className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal">
-                  <option value="0">Kindergarten</option>
-                  <option value="1">Grade 1</option>
-                  <option value="2">Grade 2</option>
-                </select>
-              </label>
+              <GradeLevelSelect name="gradeLevel" defaultValue="0" />
               <label className="text-xs font-bold">
                 Classroom
                 <select required name="classId" className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal">
@@ -378,8 +476,10 @@ export function AdminManagementView({
                 </div>
 
                 {/* Scannable QR Code */}
-                <div className="mx-auto w-48 h-48 bg-white p-2 rounded-2xl border shadow-inner grid place-items-center">
+                <div className="py-2 flex justify-center">
                   <QrExportButton
+                    bare={true}
+                    size={168}
                     compact={false}
                     autoIssue={true}
                     type="student"
@@ -391,30 +491,42 @@ export function AdminManagementView({
                   />
                 </div>
 
-                <div className="rounded-xl bg-blue-50 p-3 text-xs text-blue-900 border border-blue-200">
-                  <p className="font-extrabold flex items-center justify-center gap-1.5">
-                    <Sparkles className="h-4 w-4 text-brand" /> Zero-Typing Student Login
+                <div className="rounded-xl bg-blue-50/80 p-3.5 text-xs text-blue-900 border border-blue-200 shadow-xs">
+                  <p className="font-extrabold flex items-center justify-center gap-1.5 text-[13px]">
+                    <Sparkles className="h-4 w-4 text-brand shrink-0" /> Zero-Typing Student Login
                   </p>
-                  <p className="mt-1 text-[11px] text-blue-800">
+                  <p className="mt-1 text-[11px] text-blue-800 leading-relaxed text-center">
                     The student points their mobile tablet or phone camera at this QR code to sign in instantly.
                   </p>
                 </div>
               </div>
 
-              <div className="flex gap-2 justify-end pt-2">
+              <div className="flex items-center justify-between border-t pt-3">
                 <Button
+                  type="button"
                   variant="secondary"
                   onClick={() => handleCopy(previewCardStudent.card_code || previewCardStudent.id)}
-                  className="text-xs h-9 px-3 font-bold"
+                  className="text-xs h-9 px-3 font-bold text-navy hover:bg-blue-50 border shadow-xs inline-flex items-center"
                 >
-                  <Copy className="h-3.5 w-3.5 mr-1.5" /> Copy Code
+                  <Copy className="h-3.5 w-3.5 mr-1.5" /> Copy Token
                 </Button>
-                <Button
-                  onClick={() => window.print()}
-                  className="bg-navy text-white text-xs font-bold h-9 px-4"
-                >
-                  <Printer className="h-3.5 w-3.5 mr-1.5" /> Print Card
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="bg-navy text-white text-xs font-bold h-9 px-4 hover:bg-navy/90 inline-flex items-center"
+                  >
+                    <Printer className="h-3.5 w-3.5 mr-1.5" /> Print Card
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setPreviewCardStudent(null)}
+                    className="text-xs h-9 px-3 font-bold text-slate-700 hover:bg-slate-100 border shadow-xs"
+                  >
+                    Done
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
@@ -752,18 +864,7 @@ export function AdminManagementView({
                     className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal uppercase"
                   />
                 </label>
-                <label className="block">
-                  Grade Level
-                  <select
-                    name="gradeLevel"
-                    defaultValue={editingStudent.grade_level ?? 0}
-                    className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
-                  >
-                    <option value="0">Kindergarten</option>
-                    <option value="1">Grade 1</option>
-                    <option value="2">Grade 2</option>
-                  </select>
-                </label>
+                <GradeLevelSelect name="gradeLevel" defaultValue={editingStudent.grade_level ?? 0} />
                 <label className="block">
                   Assigned Classroom
                   <select
@@ -973,14 +1074,7 @@ export function AdminManagementView({
                 Classroom Name
                 <input required type="text" name="name" placeholder="e.g. Kindergarten A" className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal" />
               </label>
-              <label className="text-xs font-bold">
-                Grade Level
-                <select name="gradeLevel" defaultValue="0" className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal">
-                  <option value="0">Kindergarten</option>
-                  <option value="1">Grade 1</option>
-                  <option value="2">Grade 2</option>
-                </select>
-              </label>
+              <GradeLevelSelect name="gradeLevel" defaultValue="0" />
               <label className="text-xs font-bold">
                 School Year
                 <input required type="text" name="schoolYear" defaultValue="2026-2027" className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal" />
@@ -1329,18 +1423,7 @@ export function AdminManagementView({
                   />
                 </label>
                 <div className="grid grid-cols-2 gap-3">
-                  <label className="block">
-                    Grade Level
-                    <select
-                      name="gradeLevel"
-                      defaultValue={editingClass.grade_level ?? 0}
-                      className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
-                    >
-                      <option value="0">Kindergarten</option>
-                      <option value="1">Grade 1</option>
-                      <option value="2">Grade 2</option>
-                    </select>
-                  </label>
+                  <GradeLevelSelect name="gradeLevel" defaultValue={editingClass.grade_level ?? 0} />
                   <label className="block">
                     School Year
                     <input

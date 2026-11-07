@@ -1,69 +1,51 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { extractBearerToken, verifyToken } from "@/lib/auth/token";
 
-export async function GET(req: Request) {
+import { requireStudentSession, StudentSessionError } from "@/lib/student-session";
+
+export async function GET(request: Request) {
   try {
-    const token = extractBearerToken(req.headers.get("Authorization"));
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const payload = verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "Invalid or expired token" }, { status: 401 });
-
-    const supabase = createAdminClient();
-    let studentId = payload.sub;
-
-    const { data: student } = await supabase
+    const { supabase, session } = await requireStudentSession(request);
+    const { data: student, error: studentError } = await supabase
       .from("students")
-      .select("id, first_name, last_initial, class_id")
-      .eq("id", studentId)
-      .single();
-
-    let name = student?.first_name || payload.name || "Student";
-    let room = "Room 12";
-    let teacherName = "Ms. Carter";
-    let reward = "Pizza party";
-    let confirmedStars = 68;
-    let targetStars = 100;
-
-    const classId = student?.class_id || payload.classId;
-    if (classId) {
-      const { data: classData } = await supabase
-        .from("classes")
-        .select("name, reward_title, confirmed_stars, target_stars")
-        .eq("id", classId)
-        .single();
-
-      if (classData) {
-        room = classData.name;
-        reward = classData.reward_title || reward;
-        confirmedStars = classData.confirmed_stars ?? confirmedStars;
-        targetStars = classData.target_stars ?? targetStars;
-      }
-
-      const { data: assignments } = await supabase
-        .from("teacher_class_assignments")
-        .select("profiles:teacher_user_id(display_name)")
-        .eq("class_id", classId)
-        .limit(1);
-
-      if (assignments?.[0]?.profiles) {
-        teacherName = (assignments[0].profiles as any).display_name ?? teacherName;
-      }
-    }
-
+      .select("id,first_name,last_initial,grade_level,class_id,school_id")
+      .eq("id", session.student_id)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (studentError || !student?.class_id) return NextResponse.json({ error: "This student does not have an active class." }, { status: 403 });
+    const [{ data: classroom }, { data: school }, { data: teacher }, { data: rewards }, { data: completed }] = await Promise.all([
+      supabase.from("classes").select("name").eq("id", student.class_id).eq("is_active", true).maybeSingle(),
+      supabase.from("schools").select("name").eq("id", student.school_id).maybeSingle(),
+      supabase.from("teacher_class_assignments").select("profiles:teacher_user_id(display_name)").eq("class_id", student.class_id).eq("is_active", true).limit(1),
+      supabase.from("reward_goals").select("title,current_stars,target_stars").eq("class_id", student.class_id).eq("status", "active").order("created_at", { ascending: false }).limit(1),
+      supabase.from("mission_runs").select("mission:missions(mission_number)").eq("student_id", student.id).eq("complete", true),
+    ]);
+    if (!classroom) return NextResponse.json({ error: "This student’s class is no longer active." }, { status: 403 });
+    const teacherProfile = Array.isArray(teacher?.[0]?.profiles) ? teacher?.[0]?.profiles[0] : teacher?.[0]?.profiles;
+    const reward = rewards?.[0];
     return NextResponse.json({
-      studentId: student?.id || studentId,
-      name,
-      room,
-      teacher: teacherName,
-      reward,
-      confirmedStars,
-      targetStars,
-      previousMissions: [1, 2, 3]
+      student: {
+        id: student.id,
+        firstName: student.first_name,
+        lastInitial: student.last_initial,
+        gradeLevel: student.grade_level,
+        classId: student.class_id,
+        className: classroom.name,
+        schoolName: school?.name ?? null,
+        teacherName: teacherProfile?.display_name ?? null,
+      },
+      classInfo: {
+        reward: reward?.title ?? null,
+        confirmedStars: reward?.current_stars ?? 0,
+        targetStars: reward?.target_stars ?? 0,
+        previousMissions: (completed ?? []).flatMap((run) => {
+          const mission = Array.isArray(run.mission) ? run.mission[0] : run.mission;
+          return typeof mission?.mission_number === "number" ? [mission.mission_number] : [];
+        }),
+      },
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });
+  } catch (error) {
+    if (error instanceof StudentSessionError) return NextResponse.json({ error: error.message }, { status: error.status });
+    console.error("Student profile error", error);
+    return NextResponse.json({ error: "Could not load the student profile." }, { status: 500 });
   }
 }
-

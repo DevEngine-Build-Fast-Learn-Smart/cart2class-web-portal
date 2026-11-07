@@ -1,111 +1,55 @@
 import { NextResponse } from "next/server";
+
 import { createAdminClient } from "@/lib/supabase/admin";
-import { signToken } from "@/lib/auth/token";
-import crypto from "crypto";
+import { readQrToken, StudentSessionError, studentSessionHash } from "@/lib/student-session";
 
-export async function POST(req: Request) {
+export async function POST(request: Request) {
   try {
-    const body = await req.json();
-    const { cardCode, deviceId, appVersion } = body;
-
-    if (!cardCode || typeof cardCode !== "string") {
-      return NextResponse.json({ error: "cardCode is required" }, { status: 400 });
-    }
-
+    const body = await request.json();
+    const studentQrToken = readQrToken(body?.cardCode, "student");
     const supabase = createAdminClient();
-
-    // Find student either by exact card_code, id, or partial match
-    let studentQuery = supabase
+    const { data: started, error: startError } = await supabase.rpc("start_student_device_session", {
+      p_student_qr_token: studentQrToken,
+    });
+    const deviceSession = started?.[0];
+    if (startError || !deviceSession?.session_token) {
+      return NextResponse.json({ error: "This student card is invalid, expired, or has been revoked." }, { status: 401 });
+    }
+    const { data: session, error: sessionError } = await supabase
+      .from("student_device_sessions")
+      .select("student_id")
+      .eq("session_token_hash", studentSessionHash(deviceSession.session_token))
+      .maybeSingle();
+    if (sessionError || !session) throw new Error("Created student session could not be resolved.");
+    const { data: student, error: studentError } = await supabase
       .from("students")
-      .select("id, first_name, last_initial, is_active, class_id, grade_level")
-      .or(`card_code.eq.${cardCode},id.eq.${cardCode}`);
-
-    // If cardCode is like "c2c-card:v1:stu_maya_9f8a7b6c", also check if any student matches
-    const { data: students, error: studentError } = await studentQuery;
-
-    let student = students?.[0];
-
-    if (!student) {
-      // Check if code contains student name e.g. "maya"
-      const lower = cardCode.toLowerCase();
-      const { data: fallbackStudents } = await supabase
-        .from("students")
-        .select("id, first_name, last_initial, is_active, class_id, grade_level");
-
-      student = fallbackStudents?.find((s) => lower.includes(s.first_name.toLowerCase()) || s.id === cardCode);
-    }
-
-    if (!student) {
-      return NextResponse.json({ error: "Student card unknown", code: "UNKNOWN_CARD" }, { status: 404 });
-    }
-
-    if (!student.is_active) {
-      return NextResponse.json({ error: "Student account deactivated", code: "DEACTIVATED" }, { status: 403 });
-    }
-
-    // Get class info
-    let room = "Room 12";
-    let teacherName = "Ms. Carter";
-    let reward = "Pizza party";
-    let confirmedStars = 68;
-    let targetStars = 100;
-
-    if (student.class_id) {
-      const { data: classData } = await supabase
-        .from("classes")
-        .select("name, reward_title, confirmed_stars, target_stars")
-        .eq("id", student.class_id)
-        .single();
-
-      if (classData) {
-        room = classData.name;
-        reward = classData.reward_title || reward;
-        confirmedStars = classData.confirmed_stars ?? confirmedStars;
-        targetStars = classData.target_stars ?? targetStars;
-      }
-
-      // Find teacher
-      const { data: assignments } = await supabase
-        .from("teacher_class_assignments")
-        .select("teacher_user_id, profiles:teacher_user_id(display_name)")
-        .eq("class_id", student.class_id)
-        .eq("is_active", true)
-        .limit(1);
-
-      if (assignments?.[0]?.profiles) {
-        teacherName = (assignments[0].profiles as any).display_name ?? teacherName;
-      }
-    }
-
-    const refreshToken = "rt_" + crypto.randomBytes(16).toString("hex");
-    const accessToken = signToken({
-      sub: student.id,
-      role: "student",
-      classId: student.class_id ?? undefined,
-      name: `${student.first_name} ${student.last_initial ?? ""}`.trim(),
-      deviceId
-    });
-
+      .select("id,first_name,last_initial,grade_level,class_id,classes(name,schools(name))")
+      .eq("id", session.student_id)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (studentError || !student) return NextResponse.json({ error: "This student account is not active." }, { status: 403 });
+    const classInfo = (Array.isArray(student.classes) ? student.classes[0] : student.classes) as {
+      name?: string;
+      schools?: { name?: string } | { name?: string }[] | null;
+    } | null;
+    const school = Array.isArray(classInfo?.schools) ? classInfo?.schools[0] : classInfo?.schools;
     return NextResponse.json({
-      accessToken,
-      refreshToken,
-      expiresIn: 86400,
+      sessionToken: deviceSession.session_token,
+      expiresAt: deviceSession.expires_at,
       student: {
-        studentId: student.id,
-        name: student.first_name,
-        room,
-        teacher: teacherName
+        id: student.id,
+        firstName: student.first_name,
+        lastInitial: student.last_initial,
+        gradeLevel: student.grade_level,
+        classId: student.class_id,
+        className: classInfo?.name ?? null,
+        schoolName: school?.name ?? null,
       },
-      classInfo: {
-        reward,
-        confirmedStars,
-        targetStars,
-        previousMissions: [1, 2, 3]
-      }
     });
-  } catch (error: any) {
-    console.error("Student card auth error:", error);
-    return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });
+  } catch (error) {
+    if (error instanceof StudentSessionError) return NextResponse.json({ error: error.message }, { status: error.status });
+    console.error("Student card authentication failed", error);
+    return NextResponse.json({ error: "Could not sign in with that student card." }, { status: 500 });
   }
 }
 

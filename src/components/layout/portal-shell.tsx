@@ -1,13 +1,63 @@
 import Link from "next/link";
-import Image from "next/image";
 import { Bell, LogOut, Menu } from "lucide-react";
 import { logout } from "@/features/authentication/actions";
 import { roleAccents, roleLabels } from "@/lib/constants/roles";
 import type { Profile, Role } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { SidebarNavigation } from "./sidebar-navigation";
+import { BrandLogo, BrandName } from "@/components/shared/brand-logo";
 
 export function PortalShell({ children, role, profile }: { children: React.ReactNode; role: Role; profile: Profile }) {
   const initials = profile.display_name.split(" ").map((word) => word[0]).join("").slice(0, 2);
-  return <div className="min-h-screen bg-canvas lg:grid lg:grid-cols-[288px_minmax(0,1fr)]"><aside className="hidden h-screen flex-col overflow-y-auto border-r border-white/10 bg-navy px-4 py-6 text-slate-200 lg:sticky lg:top-0 lg:flex"><Link href={`/${role}`} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-[22px] font-extrabold tracking-tight text-white"><span className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-xl bg-white p-1 shadow-lg shadow-teal-950/20"><Image src="/cart2class-logo.png" width={48} height={48} alt="Cart2Class logo" className="h-full w-full object-contain" priority /></span><span>Cart2Class</span></Link><div className="mt-7 px-3"><p className="text-[11px] font-extrabold uppercase tracking-[.16em] text-slate-400">{roleLabels[role]}</p><div className="mt-3 h-px bg-white/10" /></div><SidebarNavigation role={role} /><div className="mt-auto border-t border-white/10 pt-4"><form action={logout}><Button type="submit" variant="ghost" className="h-12 w-full justify-start rounded-xl px-3 text-[15px] font-bold text-slate-300 hover:bg-white/10 hover:text-white"><LogOut className="mr-3 h-[18px] w-[18px]" />Sign out</Button></form></div></aside><div className="min-w-0"><header className="flex h-[76px] items-center justify-between border-b border-line/80 bg-white/95 px-5 backdrop-blur sm:px-8 lg:px-10"><button className="rounded-xl p-2.5 lg:hidden" aria-label="Open navigation"><Menu className="h-6 w-6" /></button><div className="hidden lg:block"><p className="text-sm font-bold text-muted">Cart2Class workspace</p></div><div className="ml-auto flex items-center gap-4"><button aria-label="Notifications" className="relative grid h-10 w-10 place-items-center rounded-xl text-muted transition hover:bg-slate-100"><Bell className="h-5 w-5" /><span className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-amber-500" /></button><div className="flex items-center gap-3 border-l border-line pl-4"><span className="grid h-10 w-10 place-items-center rounded-xl text-sm font-extrabold text-white shadow-sm" style={{ backgroundColor: roleAccents[role] }}>{initials}</span><div className="hidden sm:block"><p className="text-[15px] font-extrabold leading-5 text-ink">{profile.display_name}</p><p className="text-sm text-muted">{roleLabels[role]}</p></div></div></div></header>{children}</div></div>;
+  return (
+    <div className="min-h-screen bg-canvas lg:grid lg:grid-cols-[288px_minmax(0,1fr)]">
+      <aside className="hidden h-screen flex-col overflow-y-auto border-r border-white/10 bg-navy px-4 py-6 text-slate-200 lg:sticky lg:top-0 lg:flex">
+        <Link href={`/${role}`} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-[22px] font-extrabold tracking-tight text-white">
+          <span className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-xl bg-white p-1 shadow-lg shadow-teal-950/20">
+            <BrandLogo width={48} height={48} priority />
+          </span>
+          <BrandName />
+        </Link>
+        <div className="mt-7 px-3">
+          <p className="text-[11px] font-extrabold uppercase tracking-[.16em] text-slate-400">{roleLabels[role]}</p>
+          <div className="mt-3 h-px bg-white/10" />
+        </div>
+        <SidebarNavigation role={role} />
+        <div className="mt-auto border-t border-white/10 pt-4">
+          <form action={logout}>
+            <Button type="submit" variant="ghost" className="h-12 w-full justify-start rounded-xl px-3 text-[15px] font-bold text-slate-300 hover:bg-white/10 hover:text-white">
+              <LogOut className="mr-3 h-[18px] w-[18px]" />
+              Sign out
+            </Button>
+          </form>
+        </div>
+      </aside>
+      <div className="min-w-0">
+        <header className="flex h-[76px] items-center justify-between border-b border-line/80 bg-white/95 px-5 backdrop-blur sm:px-8 lg:px-10">
+          <button className="rounded-xl p-2.5 lg:hidden" aria-label="Open navigation">
+            <Menu className="h-6 w-6" />
+          </button>
+          <div className="hidden lg:block">
+            <p className="text-sm font-bold text-muted">Cart2Class workspace</p>
+          </div>
+          <div className="ml-auto flex items-center gap-4">
+            <button aria-label="Notifications" className="relative grid h-10 w-10 place-items-center rounded-xl text-muted transition hover:bg-slate-100">
+              <Bell className="h-5 w-5" />
+              <span className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-amber-500" />
+            </button>
+            <div className="flex items-center gap-3 border-l border-line pl-4">
+              <span className="grid h-10 w-10 place-items-center rounded-xl text-sm font-extrabold text-white shadow-sm" style={{ backgroundColor: roleAccents[role] }}>
+                {initials}
+              </span>
+              <div className="hidden sm:block">
+                <p className="text-[15px] font-extrabold leading-5 text-ink">{profile.display_name}</p>
+                <p className="text-sm text-muted">{roleLabels[role]}</p>
+              </div>
+            </div>
+          </div>
+        </header>
+        {children}
+      </div>
+    </div>
+  );
 }
