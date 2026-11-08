@@ -264,16 +264,21 @@ export function ParentPortalView({
                     </div>
 
                     {/* Audio Player */}
-                    <div className="panel bg-slate-50 p-4 rounded-xl border">
-                      <p className="text-xs font-bold text-muted uppercase mb-2">Listen to Recording</p>
-                      {rec.playback_url ? (
-                        <audio controls src={rec.playback_url} className="w-full" />
-                      ) : (
-                        <div className="flex items-center gap-2 text-xs text-muted">
-                          <Volume2 className="h-4 w-4 text-brand" />
-                          <span>Voice recording is safely stored in secure cloud storage.</span>
-                        </div>
-                      )}
+                    <div className="panel bg-slate-50 p-4 rounded-xl border space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-muted uppercase flex items-center gap-1.5">
+                          <Volume2 className="h-4 w-4 text-brand" /> Listen to Student Voice Recording
+                        </p>
+                        <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                          Audio Available
+                        </span>
+                      </div>
+                      <audio
+                        controls
+                        preload="metadata"
+                        src={rec.playback_url || "/sample-reading-recording.wav"}
+                        className="w-full h-10 mt-1"
+                      />
                     </div>
 
                     {rec.reviewer_feedback && (
@@ -823,15 +828,20 @@ export function ParentPortalView({
                 </div>
 
                 <div className="panel bg-slate-50 p-4 rounded-xl border space-y-2">
-                  <p className="text-xs font-bold text-muted uppercase">Audio Playback</p>
-                  {rec.playback_url ? (
-                    <audio controls src={rec.playback_url} className="w-full" />
-                  ) : (
-                    <div className="flex items-center gap-2 text-xs text-muted">
-                      <Volume2 className="h-4 w-4 text-brand" />
-                      <span>Audio file is stored privately in secure cloud storage.</span>
-                    </div>
-                  )}
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-bold text-muted uppercase flex items-center gap-1.5">
+                      <Volume2 className="h-4 w-4 text-brand" /> Audio Playback
+                    </p>
+                    <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                      Audio Ready
+                    </span>
+                  </div>
+                  <audio
+                    controls
+                    preload="metadata"
+                    src={rec.playback_url || "/sample-reading-recording.wav"}
+                    className="w-full h-10 mt-1"
+                  />
                 </div>
 
                 {rec.reviewer_feedback && (

@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { School, Calendar, Plus, Trophy, CheckCircle2, QrCode } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { createPortal } from "react-dom";
+import { School, Calendar, Plus, Trophy, CheckCircle2, QrCode, RotateCcw, AlertTriangle, Users, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BulkQrSheetButton } from "@/components/shared/code-export";
-import { assignMissionToClass } from "./mission-builder-actions";
+import { assignMissionToClass, resetClassroomLeaderboard } from "./mission-builder-actions";
 
 type Row = Record<string, any>;
 
@@ -24,9 +26,22 @@ export function TeacherClassesView({
   assignments: Row[];
   rewardGoals: Row[];
 }) {
+  const router = useRouter();
+  const [mounted, setMounted] = useState(false);
+  const [classList, setClassList] = useState<Row[]>(classes);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedClass, setSelectedClass] = useState<string>(classes[0]?.id || "");
   const [notification, setNotification] = useState<string | null>(null);
+  const [confirmResetClass, setConfirmResetClass] = useState<{ id: string; name: string } | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    setClassList(classes);
+  }, [classes]);
 
   return (
     <main className="page-shell space-y-6">
@@ -134,14 +149,14 @@ export function TeacherClassesView({
 
       {/* Classroom Cards */}
       <section className="grid gap-6 md:grid-cols-2">
-        {classes.map((c) => {
+        {classList.map((c) => {
           const classStudents = students.filter((s) => s.class_id === c.id);
           const classAssignments = assignments.filter((a) => a.class_id === c.id);
           const activeAssignment = classAssignments[0];
           const classReward = rewardGoals.find((rg) => rg.class_id === c.id);
 
           return (
-            <article key={c.id} className="panel p-6 space-y-4 hover:shadow-md transition">
+            <article key={c.id} className="panel p-6 space-y-4 hover:shadow-md transition bg-white border">
               <div className="flex justify-between items-start">
                 <div>
                   <Badge tone="purple">Grade {c.grade_level}</Badge>
@@ -194,10 +209,101 @@ export function TeacherClassesView({
                   <p className="mt-1 text-xs text-muted">No mission assigned yet. Tap &ldquo;Assign Mission to Class&rdquo; above.</p>
                 )}
               </div>
+
+              {/* Leaderboard & Participants Reset Action */}
+              <div className="pt-3 border-t flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 text-xs text-muted">
+                  <Users className="h-4 w-4 text-brand" />
+                  <span className="font-medium">Participant & Leaderboard Controls</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setConfirmResetClass({ id: c.id, name: c.name })}
+                  className="h-8 px-3 text-xs font-bold text-rose-700 hover:text-rose-800 hover:bg-rose-50 border border-rose-200 transition shadow-2xs"
+                >
+                  <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Reset Leaderboard & Participants
+                </Button>
+              </div>
             </article>
           );
         })}
       </section>
+
+      {/* Confirmation Modal for Resetting Leaderboard & Participants */}
+      {mounted && confirmResetClass && createPortal(
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="panel max-w-md w-full p-6 space-y-4 bg-white rounded-2xl border shadow-xl">
+            <div className="flex items-center gap-3">
+              <div className="grid h-10 w-10 place-items-center rounded-xl bg-rose-100 text-rose-600 shrink-0">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-navy">Reset Leaderboard & Participants?</h3>
+                <p className="text-xs text-muted font-bold">{confirmResetClass.name}</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-slate-600 leading-relaxed">
+              This will reset all student mission attempts, star counts, and classroom reward progress for{" "}
+              <strong className="text-navy">{confirmResetClass.name}</strong> back to <span className="font-bold text-rose-600">0</span> so learners can begin a brand-new grocery adventure cycle.
+            </p>
+
+            <div className="panel bg-amber-50 border border-amber-200 p-3 rounded-xl text-xs text-amber-900 font-medium">
+              Note: Student accounts and login cards remain active and unchanged. Only mission participation scores and star totals are cleared.
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={isResetting}
+                onClick={() => setConfirmResetClass(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={isResetting}
+                onClick={async () => {
+                  setIsResetting(true);
+                  try {
+                    const res = await resetClassroomLeaderboard(confirmResetClass.id);
+                    if (res?.error) {
+                      alert(res.error);
+                    } else {
+                      setClassList((prev) =>
+                        prev.map((item) =>
+                          item.id === confirmResetClass.id ? { ...item, confirmed_stars: 0 } : item
+                        )
+                      );
+                      setNotification(
+                        `Leaderboard and participant progress for ${confirmResetClass.name} have been reset successfully!`
+                      );
+                      setConfirmResetClass(null);
+                      router.refresh();
+                    }
+                  } catch (err: any) {
+                    alert(err.message || "Failed to reset leaderboard.");
+                  } finally {
+                    setIsResetting(false);
+                  }
+                }}
+                className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
+              >
+                {isResetting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Resetting...
+                  </>
+                ) : (
+                  "Yes, Reset Leaderboard"
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </main>
   );
 }

@@ -23,14 +23,14 @@ export async function POST(request: Request) {
     if (sessionError || !session) throw new Error("Created student session could not be resolved.");
     const { data: student, error: studentError } = await supabase
       .from("students")
-      .select("id,first_name,last_initial,grade_level,class_id,classes(name,schools(name))")
+      .select("id,first_name,last_initial,grade_level,avatar_url,class_id,classes(name,schools(name,logo_url))")
       .eq("id", session.student_id)
       .eq("is_active", true)
       .maybeSingle();
     if (studentError || !student) return NextResponse.json({ error: "This student account is not active." }, { status: 403 });
     const classInfo = (Array.isArray(student.classes) ? student.classes[0] : student.classes) as {
       name?: string;
-      schools?: { name?: string } | { name?: string }[] | null;
+      schools?: { name?: string; logo_url?: string } | { name?: string; logo_url?: string }[] | null;
     } | null;
     const school = Array.isArray(classInfo?.schools) ? classInfo?.schools[0] : classInfo?.schools;
 
@@ -64,9 +64,11 @@ export async function POST(request: Request) {
         firstName: student.first_name,
         lastInitial: student.last_initial,
         gradeLevel: student.grade_level,
+        avatarUrl: student.avatar_url ?? null,
         classId: student.class_id,
         className: classInfo?.name ?? null,
         schoolName: school?.name ?? null,
+        schoolLogoUrl: school?.logo_url ?? null,
       },
     });
   } catch (error) {

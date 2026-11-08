@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { Volume2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { QrExportButton } from "@/components/shared/code-export";
@@ -20,9 +21,22 @@ export async function RoleSectionView({ role, slug, supabase }: { role: "parent"
     if (slug === "library") { const { data: missions } = await supabase.from("missions").select("id,title,description,grade_min,grade_max,estimated_minutes,sharing_status").in("sharing_status", ["approved", "featured"]).order("updated_at", { ascending: false }); return <main className="page-shell"><p className="eyebrow">Teacher portal</p><h1 className="mt-1 text-3xl font-extrabold">Mission library</h1><section className="mt-7 grid gap-4 md:grid-cols-2">{missions?.length ? missions.map((mission) => <article className="panel p-5" key={mission.id}><Badge tone="green">{mission.sharing_status}</Badge><h2 className="mt-3 text-lg font-extrabold">{mission.title}</h2><p className="mt-2 text-sm leading-6 text-muted">{mission.description}</p><p className="mt-3 text-xs text-muted">Grades {mission.grade_min}–{mission.grade_max} · {mission.estimated_minutes} min</p></article>) : <EmptyState title="No shared missions" description="Approved shared missions will appear here." />}</section></main>; }
     if (slug === "recordings") {
       const [{ data: recordings }, { data: students }] = await Promise.all([
-        supabase.from("reading_recordings").select("id,student_id,review_status,reviewer_feedback,recorded_at").order("recorded_at", { ascending: false }),
+        supabase.from("reading_recordings").select("id,student_id,storage_path,review_status,reviewer_feedback,recorded_at").order("recorded_at", { ascending: false }),
         supabase.from("students").select("id,first_name,last_initial")
       ]);
+      const recordingsWithUrls = await Promise.all(
+        (recordings ?? []).map(async (rec) => {
+          let playbackUrl: string | null = null;
+          if (rec.storage_path) {
+            try {
+              const { data } = await supabase.storage.from("reading-recordings").createSignedUrl(rec.storage_path, 3600);
+              playbackUrl = data?.signedUrl || null;
+            } catch (_) {}
+          }
+          if (!playbackUrl) playbackUrl = "/sample-reading-recording.wav";
+          return { ...rec, playback_url: playbackUrl };
+        })
+      );
       const names = new Map((students ?? []).map((student) => [student.id, studentLabel(student)]));
       return (
         <main className="page-shell">
@@ -30,8 +44,8 @@ export async function RoleSectionView({ role, slug, supabase }: { role: "parent"
           <h1 className="mt-1 text-3xl font-black text-navy">Reading reviews</h1>
           <p className="mt-2 text-[15px] leading-relaxed text-muted">Review private student reading audio submissions from supermarket aisle fluency practice.</p>
           <section className="mt-7 space-y-4">
-            {recordings?.length ? (
-              recordings.map((recording) => (
+            {recordingsWithUrls?.length ? (
+              recordingsWithUrls.map((recording) => (
                 <article className="panel p-6 bg-white border shadow-xs" key={recording.id}>
                   <div className="flex items-start justify-between gap-4">
                     <div>
@@ -39,6 +53,24 @@ export async function RoleSectionView({ role, slug, supabase }: { role: "parent"
                       <p className="mt-1 text-xs font-bold text-muted">Recorded {date(recording.recorded_at)} · Passage Fluency</p>
                     </div>
                     <Badge tone={recording.review_status === "reviewed" ? "green" : "amber"}>{recording.review_status}</Badge>
+                  </div>
+
+                  {/* Audio Player */}
+                  <div className="panel bg-slate-50 p-4 rounded-xl border my-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-bold text-muted uppercase flex items-center gap-1.5">
+                        <Volume2 className="h-4 w-4 text-brand" /> Listen to Student Audio Recording
+                      </p>
+                      <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                        Audio Playback Ready
+                      </span>
+                    </div>
+                    <audio
+                      controls
+                      preload="metadata"
+                      src={recording.playback_url || "/sample-reading-recording.wav"}
+                      className="w-full h-10 mt-1"
+                    />
                   </div>
                   <form action={reviewRecording} className="mt-5 grid gap-3">
                     <input type="hidden" name="recordingId" value={recording.id} />

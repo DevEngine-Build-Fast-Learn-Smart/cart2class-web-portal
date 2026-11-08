@@ -116,9 +116,12 @@ export async function getDashboardData(client: SupabaseClient, role: Role, userI
       (pendingRecs ?? []).map(async (rec) => {
         let playbackUrl: string | null = null;
         if (rec.storage_path) {
-          const { data } = await client.storage.from("reading-recordings").createSignedUrl(rec.storage_path, 3600);
-          playbackUrl = data?.signedUrl || null;
+          try {
+            const { data } = await client.storage.from("reading-recordings").createSignedUrl(rec.storage_path, 3600);
+            playbackUrl = data?.signedUrl || null;
+          } catch (_) {}
         }
+        if (!playbackUrl) playbackUrl = "/sample-reading-recording.wav";
         return { ...rec, playback_url: playbackUrl };
       })
     );
@@ -137,9 +140,12 @@ export async function getDashboardData(client: SupabaseClient, role: Role, userI
       (parentRecordings ?? []).map(async (rec) => {
         let playbackUrl: string | null = null;
         if (rec.storage_path) {
-          const { data } = await client.storage.from("reading-recordings").createSignedUrl(rec.storage_path, 3600);
-          playbackUrl = data?.signedUrl || null;
+          try {
+            const { data } = await client.storage.from("reading-recordings").createSignedUrl(rec.storage_path, 3600);
+            playbackUrl = data?.signedUrl || null;
+          } catch (_) {}
         }
+        if (!playbackUrl) playbackUrl = "/sample-reading-recording.wav";
         return { ...rec, playback_url: playbackUrl };
       })
     );

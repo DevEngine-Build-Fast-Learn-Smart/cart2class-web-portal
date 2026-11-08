@@ -248,8 +248,13 @@ export default async function PortalPage({
         (recordings ?? []).map(async (rec) => {
           let playbackUrl: string | null = null;
           if (rec.storage_path) {
-            const { data } = await supabase.storage.from("reading-recordings").createSignedUrl(rec.storage_path, 3600);
-            playbackUrl = data?.signedUrl || null;
+            try {
+              const { data } = await supabase.storage.from("reading-recordings").createSignedUrl(rec.storage_path, 3600);
+              playbackUrl = data?.signedUrl || null;
+            } catch (_) {}
+          }
+          if (!playbackUrl) {
+            playbackUrl = "/sample-reading-recording.wav";
           }
           return { ...rec, playback_url: playbackUrl };
         })

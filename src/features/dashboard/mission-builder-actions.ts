@@ -98,23 +98,35 @@ export async function saveStage2Product(formData: FormData) {
   // Handle uploaded product file if provided
   const productFile = formData.get("productFile") as File | null;
   if (productFile && productFile.size > 0) {
+    if (productFile.size > 5 * 1024 * 1024) {
+      return { error: "Product picture must be less than 5MB." };
+    }
     try {
       const buffer = Buffer.from(await productFile.arrayBuffer());
       const fileName = `${Date.now()}_${productFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
       const storagePath = `products/${missionId || "general"}/${fileName}`;
       const { error: uploadErr } = await adminClient.storage
         .from("mission-assets")
-        .upload(storagePath, buffer, { contentType: productFile.type, upsert: true });
+        .upload(storagePath, buffer, { contentType: productFile.type || "image/png", upsert: true });
 
       if (!uploadErr) {
         const { data: pubUrl } = adminClient.storage.from("mission-assets").getPublicUrl(storagePath);
         if (pubUrl?.publicUrl) imageAsset = pubUrl.publicUrl;
+      } else {
+        // Fallback to base64 data URI so image is always preserved
+        imageAsset = `data:${productFile.type || "image/png"};base64,${buffer.toString("base64")}`;
       }
-    } catch (_) {}
+    } catch (_) {
+      try {
+        const buffer = Buffer.from(await productFile.arrayBuffer());
+        imageAsset = `data:${productFile.type || "image/png"};base64,${buffer.toString("base64")}`;
+      } catch (_) {}
+    }
   }
 
+  let savedProduct: any = null;
   if (productId) {
-    await adminClient.from("mission_products").update({
+    const { data } = await adminClient.from("mission_products").update({
       name,
       description,
       barcode,
@@ -124,10 +136,11 @@ export async function saveStage2Product(formData: FormData) {
       package_size: packageSize,
       instructions,
       updated_at: new Date().toISOString()
-    }).eq("id", productId);
+    }).eq("id", productId).select("*").single();
+    savedProduct = data;
   } else {
     const { count } = await adminClient.from("mission_products").select("*", { count: "exact", head: true }).eq("mission_id", missionId);
-    await adminClient.from("mission_products").insert({
+    const { data } = await adminClient.from("mission_products").insert({
       mission_id: missionId,
       name,
       description,
@@ -140,11 +153,12 @@ export async function saveStage2Product(formData: FormData) {
       instructions,
       order_index: (count || 0) + 1,
       is_available: true
-    });
+    }).select("*").single();
+    savedProduct = data;
   }
 
-  refresh("/teacher/missions", `/teacher/missions/${missionId}`);
-  return { success: true };
+  refresh("/teacher/missions", `/teacher/missions/${missionId}`, `/admin/missions`);
+  return { success: true, product: savedProduct };
 }
 
 export async function deleteStage2Product(formData: FormData) {
@@ -395,6 +409,67 @@ export async function uploadOptionImage(formData: FormData) {
   });
 
   return { success: true, url: cdnUrl };
+}
+
+export async function resetClassroomLeaderboard(classId: string) {
+  const access = await requireRole("teacher");
+  if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
+  if (!classId) return { error: "Classroom ID is required." };
+
+  const adminClient = createAdminClient();
+
+  // 1. Get all students in this class
+  const { data: students } = await adminClient
+    .from("students")
+    .select("id")
+    .eq("class_id", classId);
+
+  const studentIds = (students ?? []).map((s) => s.id);
+
+  if (studentIds.length > 0) {
+    // 2. Clear mission attempts for these students
+    await adminClient
+      .from("mission_attempts")
+      .delete()
+      .in("student_id", studentIds);
+
+    // 3. Clear mission runs for these students
+    await adminClient
+      .from("mission_runs")
+      .delete()
+      .in("student_id", studentIds);
+  }
+
+  // 4. Reset class confirmed stars
+  await adminClient
+    .from("classes")
+    .update({ confirmed_stars: 0, updated_at: new Date().toISOString() })
+    .eq("id", classId);
+
+  // 5. Reset reward goals current stars
+  await adminClient
+    .from("reward_goals")
+    .update({ current_stars: 0, updated_at: new Date().toISOString() })
+    .eq("class_id", classId);
+
+  // 6. Audit log entry
+  try {
+    await adminClient.from("audit_logs").insert({
+      organization_id: "00000000-0000-0000-0000-000000000001",
+      actor_user_id: access.profile.id,
+      action: "classroom.reset_leaderboard",
+      entity_type: "class",
+      entity_id: classId,
+      metadata: {
+        teacher_name: access.profile.display_name,
+        students_affected: studentIds.length,
+        reset_at: new Date().toISOString()
+      }
+    });
+  } catch (_) {}
+
+  refresh("/teacher/classes", "/teacher", "/parent/leaderboard", "/parent/progress");
+  return { success: true };
 }
 
 

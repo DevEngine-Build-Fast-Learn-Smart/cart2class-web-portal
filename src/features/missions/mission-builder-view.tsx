@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Volume2,
@@ -16,7 +17,10 @@ import {
   X,
   FileAudio,
   FileImage,
-  ImageIcon
+  ImageIcon,
+  CheckCircle2,
+  AlertCircle,
+  Loader2
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,10 +54,28 @@ export function MissionBuilderView({
   assets: Row[];
   stores: Row[];
 }) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<"stage1" | "stage2" | "stage3" | "stage4" | "media" | "preview">("stage1");
   const [previewStage, setPreviewStage] = useState<number>(0);
   const [selectedProduct, setSelectedProduct] = useState<Row | null>(null);
   const [selectedQuestion, setSelectedQuestion] = useState<Row | null>(null);
+
+  const [productList, setProductList] = useState<Row[]>(products);
+  const [productImagePreview, setProductImagePreview] = useState<string | null>(null);
+  const [stage2Toast, setStage2Toast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [isSubmittingProduct, setIsSubmittingProduct] = useState(false);
+
+  useEffect(() => {
+    setProductList(products);
+  }, [products]);
+
+  const resolveProductImg = (asset: string | null | undefined): string | null => {
+    if (!asset || typeof asset !== "string") return null;
+    const trimmed = asset.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith("assets/")) return `/${trimmed}`;
+    return trimmed;
+  };
 
   const stage1 = stages.find((s) => s.stage_key === "phonemic_awareness") || stages[0];
   const stage2 = stages.find((s) => s.stage_key === "phonics") || stages[1];
@@ -254,8 +276,81 @@ export function MissionBuilderView({
             <p className="text-sm text-muted">Configure scannable produce and package items for student discovery in the aisles.</p>
           </div>
 
-          <form action={async (fd) => { await saveStage2Product(fd); }} className="panel p-5 bg-slate-50 border space-y-4">
-            <h4 className="font-extrabold text-ink">Add / Edit Mission Product</h4>
+          {stage2Toast && (
+            <div
+              className={`flex items-center gap-2 rounded-xl p-4 text-sm font-bold border ${
+                stage2Toast.type === "success"
+                  ? "bg-teal-50 border-teal-200 text-teal-800"
+                  : "bg-rose-50 border-rose-200 text-rose-800"
+              }`}
+            >
+              {stage2Toast.type === "success" ? (
+                <CheckCircle2 className="h-5 w-5 text-teal-600 shrink-0" />
+              ) : (
+                <AlertCircle className="h-5 w-5 text-rose-600 shrink-0" />
+              )}
+              <span>{stage2Toast.message}</span>
+            </div>
+          )}
+
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setIsSubmittingProduct(true);
+              setStage2Toast(null);
+              try {
+                const fd = new FormData(e.currentTarget);
+                const res = await saveStage2Product(fd);
+                if (res?.error) {
+                  setStage2Toast({ type: "error", message: res.error });
+                } else {
+                  setStage2Toast({
+                    type: "success",
+                    message: selectedProduct
+                      ? "Product updated successfully with picture!"
+                      : "Product added successfully with picture!"
+                  });
+                  if (res?.product) {
+                    setProductList((prev) => {
+                      const idx = prev.findIndex((item) => item.id === res.product.id);
+                      if (idx >= 0) {
+                        const updated = [...prev];
+                        updated[idx] = res.product;
+                        return updated;
+                      }
+                      return [...prev, res.product];
+                    });
+                  }
+                  setSelectedProduct(null);
+                  setProductImagePreview(null);
+                  (e.target as HTMLFormElement).reset();
+                  router.refresh();
+                }
+              } catch (err: any) {
+                setStage2Toast({ type: "error", message: err.message || "Failed to save product." });
+              } finally {
+                setIsSubmittingProduct(false);
+              }
+            }}
+            className="panel p-5 bg-slate-50 border space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <h4 className="font-extrabold text-ink">
+                {selectedProduct ? `Edit Product: ${selectedProduct.name}` : "Add New Mission Product"}
+              </h4>
+              {selectedProduct && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedProduct(null);
+                    setProductImagePreview(null);
+                  }}
+                  className="text-xs font-bold text-muted hover:text-navy"
+                >
+                  Cancel Edit
+                </button>
+              )}
+            </div>
             <input type="hidden" name="missionId" value={mission.id} />
             <input type="hidden" name="productId" value={selectedProduct?.id || ""} />
 
@@ -265,7 +360,9 @@ export function MissionBuilderView({
                 <input
                   required
                   name="name"
-                  defaultValue={selectedProduct?.name || "corn"}
+                  key={`name-${selectedProduct?.id || "new"}`}
+                  defaultValue={selectedProduct?.name || ""}
+                  placeholder="e.g. Fresh Sweet Corn"
                   className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
                 />
               </label>
@@ -274,7 +371,9 @@ export function MissionBuilderView({
                 <input
                   required
                   name="barcode"
-                  defaultValue={selectedProduct?.barcode || "012345678905"}
+                  key={`barcode-${selectedProduct?.id || "new"}`}
+                  defaultValue={selectedProduct?.barcode || ""}
+                  placeholder="e.g. 012345678905 or C2CAPPLE001"
                   className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal font-mono"
                 />
               </label>
@@ -284,6 +383,7 @@ export function MissionBuilderView({
                   type="number"
                   step="0.01"
                   name="price"
+                  key={`price-${selectedProduct?.id || "new"}`}
                   defaultValue={selectedProduct ? selectedProduct.price_cents / 100 : 1.0}
                   className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
                 />
@@ -293,6 +393,7 @@ export function MissionBuilderView({
                 <input
                   type="number"
                   name="weightGrams"
+                  key={`weight-${selectedProduct?.id || "new"}`}
                   defaultValue={selectedProduct?.weight_grams || 500}
                   className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
                 />
@@ -301,74 +402,201 @@ export function MissionBuilderView({
                 Package Size / Unit
                 <input
                   name="packageSize"
-                  defaultValue={selectedProduct?.package_size || "2 for $1"}
+                  key={`pkg-${selectedProduct?.id || "new"}`}
+                  defaultValue={selectedProduct?.package_size || "1 each"}
+                  placeholder="e.g. 2 for $1 or 1 lb bag"
                   className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
                 />
               </label>
-              <div className="text-sm font-bold md:col-span-3 panel bg-white p-3 rounded-xl border">
-                <span className="block text-xs font-bold uppercase text-muted mb-2">Product Picture (Upload File or Enter URL)</span>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="text-xs font-normal">
-                    <span className="font-bold text-ink block mb-1">Upload Local Image</span>
-                    <input
-                      type="file"
-                      name="productFile"
-                      accept="image/*"
-                      className="block w-full text-xs font-normal file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-brand hover:file:bg-blue-100"
-                    />
-                  </label>
-                  <label className="text-xs font-normal">
-                    <span className="font-bold text-ink block mb-1">Or Image Link / Asset Path</span>
-                    <input
-                      name="imageAsset"
-                      placeholder="e.g. assets/images/corn.svg or https://..."
-                      defaultValue={selectedProduct?.image_asset || "assets/images/corn.svg"}
-                      className="block h-9 w-full rounded-lg border bg-slate-50 px-3 text-xs font-normal"
-                    />
-                  </label>
+
+              {/* Product Picture upload & link section */}
+              <div className="text-sm font-bold md:col-span-3 panel bg-white p-4 rounded-xl border space-y-3">
+                <span className="block text-xs font-bold uppercase text-muted">
+                  Product Picture (Upload File or Enter Image Link)
+                </span>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                  {/* Live Preview Box */}
+                  <div className="h-20 w-20 rounded-xl bg-slate-50 border-2 border-dashed border-slate-300 overflow-hidden shrink-0 flex items-center justify-center p-1 shadow-2xs">
+                    {productImagePreview || selectedProduct?.image_asset ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={resolveProductImg(productImagePreview || selectedProduct?.image_asset) || ""}
+                        alt="Product Preview"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-contain"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLElement).style.display = "none";
+                          const fb = e.currentTarget.nextElementSibling as HTMLElement;
+                          if (fb) fb.classList.remove("hidden");
+                        }}
+                      />
+                    ) : null}
+                    <div
+                      className={`grid h-full w-full place-items-center text-slate-300 ${
+                        productImagePreview || selectedProduct?.image_asset ? "hidden" : ""
+                      }`}
+                    >
+                      <ShoppingBag className="h-7 w-7 text-slate-300" />
+                    </div>
+                  </div>
+
+                  {/* Inputs */}
+                  <div className="grid gap-3 sm:grid-cols-2 flex-1 w-full">
+                    <label className="text-xs font-normal">
+                      <span className="font-bold text-ink block mb-1">Upload Local Image (Max 5MB)</span>
+                      <input
+                        type="file"
+                        name="productFile"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            if (file.size > 5 * 1024 * 1024) {
+                              alert("File size exceeds 5MB limit. Please choose a smaller image.");
+                              e.target.value = "";
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              setProductImagePreview(event.target?.result as string);
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                        className="block w-full text-xs font-normal file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-brand hover:file:bg-blue-100"
+                      />
+                    </label>
+                    <label className="text-xs font-normal">
+                      <span className="font-bold text-ink block mb-1">Or Image Link / Asset Path</span>
+                      <input
+                        name="imageAsset"
+                        placeholder="e.g. assets/images/corn.svg or https://..."
+                        key={`asset-${selectedProduct?.id || "new"}`}
+                        defaultValue={selectedProduct?.image_asset || "assets/images/corn.svg"}
+                        onChange={(e) => setProductImagePreview(e.target.value)}
+                        className="block h-9 w-full rounded-lg border bg-slate-50 px-3 text-xs font-normal"
+                      />
+                    </label>
+                  </div>
                 </div>
               </div>
+
               <label className="text-sm font-bold md:col-span-3">
                 Instructions for Student
                 <input
                   name="instructions"
+                  key={`instr-${selectedProduct?.id || "new"}`}
                   defaultValue={selectedProduct?.instructions || "Find fresh sweet corn in produce and scan the barcode sticker."}
                   className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
                 />
               </label>
             </div>
-            <div className="flex gap-2">
-              <Button type="submit" className="bg-navy text-white font-bold">
-                {selectedProduct ? "Update Product" : "Add Product"}
+            <div className="flex gap-2 pt-2">
+              <Button type="submit" disabled={isSubmittingProduct} className="bg-navy text-white font-bold">
+                {isSubmittingProduct ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...
+                  </>
+                ) : selectedProduct ? (
+                  "Update Product"
+                ) : (
+                  "Add Product"
+                )}
               </Button>
               {selectedProduct && (
-                <Button type="button" variant="secondary" onClick={() => setSelectedProduct(null)}>Clear</Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setSelectedProduct(null);
+                    setProductImagePreview(null);
+                  }}
+                >
+                  Clear
+                </Button>
               )}
             </div>
           </form>
 
           {/* Products grid */}
           <div className="grid gap-4 md:grid-cols-2">
-            {products.map((p) => (
-              <div key={p.id} className="panel p-4 flex justify-between items-start hover:bg-slate-50">
-                <div>
-                  <span className="text-xs font-bold text-teal-700 uppercase">Barcode: {p.barcode}</span>
-                  <h5 className="font-extrabold text-ink text-base capitalize">{p.name}</h5>
-                  <p className="text-sm font-bold text-brand mt-1">
-                    ${(p.price_cents / 100).toFixed(2)} · {p.weight_grams}g · {p.package_size}
-                  </p>
-                  <p className="text-xs text-muted mt-2">{p.instructions || "Scan to match item."}</p>
+            {productList.map((p) => {
+              const imgSrc = resolveProductImg(p.image_asset);
+              return (
+                <div key={p.id} className="panel p-5 flex flex-col justify-between bg-white border hover:shadow-sm transition">
+                  <div className="flex items-start gap-4">
+                    {/* Product Image Thumbnail */}
+                    <div className="h-20 w-20 rounded-xl bg-slate-50 border border-slate-200 overflow-hidden shrink-0 shadow-2xs flex items-center justify-center p-1.5">
+                      {imgSrc ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={imgSrc}
+                          alt={p.name}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-contain"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLElement).style.display = "none";
+                            const fb = e.currentTarget.nextElementSibling as HTMLElement;
+                            if (fb) fb.classList.remove("hidden");
+                          }}
+                        />
+                      ) : null}
+                      <div
+                        className={`grid h-full w-full place-items-center bg-blue-50/50 text-slate-300 ${
+                          imgSrc ? "hidden" : ""
+                        }`}
+                      >
+                        <ShoppingBag className="h-8 w-8 text-brand/40" />
+                      </div>
+                    </div>
+
+                    {/* Product Details */}
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs font-bold text-teal-700 uppercase tracking-wide">
+                        Barcode: {p.barcode}
+                      </span>
+                      <h5 className="font-extrabold text-ink text-base capitalize truncate mt-0.5">{p.name}</h5>
+                      <p className="text-sm font-bold text-brand mt-1">
+                        ${(p.price_cents / 100).toFixed(2)} · {p.weight_grams}g · {p.package_size}
+                      </p>
+                      <p className="text-xs text-muted mt-1.5 line-clamp-2">
+                        {p.instructions || "Scan to match item."}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-3 mt-3 border-t">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => {
+                        setSelectedProduct(p);
+                        setProductImagePreview(p.image_asset || null);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      className="h-8 px-3 text-xs font-bold"
+                    >
+                      Edit Product
+                    </Button>
+                    <form
+                      action={async (fd) => {
+                        if (confirm(`Are you sure you want to delete ${p.name}?`)) {
+                          await deleteStage2Product(fd);
+                          setProductList((prev) => prev.filter((item) => item.id !== p.id));
+                          router.refresh();
+                        }
+                      }}
+                    >
+                      <input type="hidden" name="productId" value={p.id} />
+                      <input type="hidden" name="missionId" value={mission.id} />
+                      <Button variant="ghost" type="submit" className="h-8 px-2 text-rose-600 hover:bg-rose-50">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </form>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button variant="secondary" onClick={() => setSelectedProduct(p)} className="h-8 px-2 text-xs">Edit</Button>
-                  <form action={async (fd) => { await deleteStage2Product(fd); }}>
-                    <input type="hidden" name="productId" value={p.id} />
-                    <input type="hidden" name="missionId" value={mission.id} />
-                    <Button variant="ghost" className="h-8 px-2 text-rose-600"><Trash2 className="h-4 w-4" /></Button>
-                  </form>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

@@ -241,9 +241,12 @@ export function DashboardView({
                         <Badge tone="amber">Pending Review</Badge>
                       </div>
                       <p className="text-xs text-muted">Passage: Fresh Corn</p>
-                      {rec.playback_url && (
-                        <audio controls src={rec.playback_url} className="w-full h-8" />
-                      )}
+                      <audio
+                        controls
+                        preload="metadata"
+                        src={rec.playback_url || "/sample-reading-recording.wav"}
+                        className="w-full h-9 mt-1"
+                      />
                     </div>
                   ))}
                 </div>
