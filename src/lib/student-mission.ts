@@ -40,9 +40,17 @@ export async function missionPayload(supabase: SupabaseClient, assignment: Assig
   if (!phonemic || !mathStage || !fluency) throw new StudentMissionError("This mission is missing required learning stages.", 409);
   const forStage = (stageId: string) => (questions ?? []).filter((question) => question.stage_id === stageId);
   const sounds = forStage(phonemic.id).map((question) => {
-    const config = (question.answer_config ?? {}) as { correct?: string; options?: string[] };
+    const config = (question.answer_config ?? {}) as { correct?: string; options?: string[]; optionImages?: Record<string, string> };
     if (!config.correct || !Array.isArray(config.options) || config.options.length < 2) throw new StudentMissionError("A sound question is not fully configured.", 409);
-    return { id: question.id, prompt: question.prompt_text, spoken: question.spoken_prompt ?? question.prompt_text, correct: config.correct, hint: question.hint_text ?? "Listen carefully and try again.", options: config.options };
+    return {
+      id: question.id,
+      prompt: question.prompt_text,
+      spoken: question.spoken_prompt ?? question.prompt_text,
+      correct: config.correct,
+      hint: question.hint_text ?? "Listen carefully and try again.",
+      options: config.options,
+      optionImages: config.optionImages ?? {}
+    };
   });
   const math = forStage(mathStage.id).map((question) => ({ id: question.id, prompt: question.prompt_text, kind: question.question_kind }));
   const passageText = fluency.passage_text || mission.passage;
