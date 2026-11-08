@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, BookOpenCheck, Building2, ClipboardCheck, LibraryBig, LineChart, QrCode, School, Settings, Trophy, UsersRound, type LucideIcon } from "lucide-react";
+import { Bell, BookOpenCheck, Building2, ClipboardCheck, LibraryBig, LineChart, QrCode, School, Settings, Trophy, UsersRound, Barcode, type LucideIcon } from "lucide-react";
 import type { Role } from "@/types/domain";
 
 type NavigationItem = { name: string; href: string; icon: LucideIcon };
@@ -20,12 +20,14 @@ const nav: Record<Role, NavigationItem[]> = {
     { name: "Classes", href: "/teacher/classes", icon: School },
     { name: "Students & QR cards", href: "/teacher/students", icon: QrCode },
     { name: "Missions", href: "/teacher/missions", icon: ClipboardCheck },
+    { name: "QR & Barcodes", href: "/teacher/barcodes", icon: Barcode },
     { name: "Mission library", href: "/teacher/library", icon: LibraryBig },
     { name: "Reading reviews", href: "/teacher/recordings", icon: BookOpenCheck }
   ],
   store: [
     { name: "Overview", href: "/store", icon: LineChart },
     { name: "Check-in QR", href: "/store/check-in", icon: QrCode },
+    { name: "QR & Barcodes", href: "/store/barcodes", icon: Barcode },
     { name: "Products", href: "/store/products", icon: LibraryBig },
     { name: "Class participation", href: "/store/participation", icon: LineChart },
     { name: "Rewards", href: "/store/rewards", icon: Trophy },
@@ -39,6 +41,7 @@ const nav: Record<Role, NavigationItem[]> = {
     { name: "Users & students", href: "/admin/users", icon: UsersRound },
     { name: "Partner stores", href: "/admin/stores", icon: Building2 },
     { name: "Missions", href: "/admin/missions", icon: ClipboardCheck },
+    { name: "QR & Barcodes", href: "/admin/barcodes", icon: Barcode },
     { name: "Mission library", href: "/admin/library", icon: LibraryBig },
     { name: "Review queue", href: "/admin/reviews", icon: BookOpenCheck },
     { name: "Reports", href: "/admin/reports", icon: LineChart },

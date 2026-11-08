@@ -157,7 +157,28 @@ export async function saveStage2Product(formData: FormData) {
     savedProduct = data;
   }
 
-  refresh("/teacher/missions", `/teacher/missions/${missionId}`, `/admin/missions`);
+  // Also sync with global products catalog
+  try {
+    const { data: globalProd } = await adminClient.from("products").select("id").eq("barcode", barcode).maybeSingle();
+    let globalProdId = globalProd?.id;
+    if (!globalProdId) {
+      const { data: newP } = await adminClient.from("products").insert({
+        barcode,
+        name,
+        category: "Produce",
+        price: priceDollars,
+        weight_text: `${weightGrams}g`,
+        data_source: "Mission Builder",
+        barcode_symbology: "CODE128"
+      }).select("id").maybeSingle();
+      globalProdId = newP?.id;
+    }
+    if (globalProdId && savedProduct?.id) {
+      await adminClient.from("mission_products").update({ product_id: globalProdId }).eq("id", savedProduct.id);
+    }
+  } catch (_) {}
+
+  refresh("/teacher/missions", `/teacher/missions/${missionId}`, `/admin/missions`, `/store/products`);
   return { success: true, product: savedProduct };
 }
 

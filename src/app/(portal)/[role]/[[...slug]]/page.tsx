@@ -19,6 +19,7 @@ import { TeacherClassesView } from "@/features/dashboard/teacher-classes-view";
 import { ParentPortalView } from "@/features/dashboard/parent-portal-view";
 import { MissionBuilderView } from "@/features/missions/mission-builder-view";
 import { MissionLibraryView } from "@/features/missions/mission-library-view";
+import { QrBarcodeManagementView } from "@/features/dashboard/qr-barcode-management-view";
 
 type Row = Record<string, any>;
 
@@ -58,6 +59,98 @@ export default async function PortalPage({
     // Overview Dashboard
     const data = await getDashboardData(supabase, role, access.profile.id);
     content = <DashboardView role={role} displayName={access.profile.display_name} {...data} />;
+  } else if (currentSlug === "barcodes") {
+    const [
+      { data: products },
+      { data: missionProducts },
+      { data: missions },
+      { data: students },
+      { data: classes },
+      { data: stores }
+    ] = await Promise.all([
+      supabase
+        .from("products")
+        .select("id,name,barcode,price,weight_text,category,barcode_symbology")
+        .not("barcode", "is", null)
+        .order("name"),
+      supabase
+        .from("mission_products")
+        .select("id,name,barcode,price_cents,package_size,mission_id")
+        .not("barcode", "is", null)
+        .order("name"),
+      supabase
+        .from("missions")
+        .select("id,title,mission_number,current_version,status,estimated_minutes")
+        .order("updated_at", { ascending: false }),
+      supabase
+        .from("students")
+        .select("id,first_name,last_initial,grade_level,class_id,is_active")
+        .order("first_name"),
+      supabase.from("classes").select("id,name"),
+      supabase.from("stores").select("id,name,is_active").order("name")
+    ]);
+
+    const classNameById = new Map((classes ?? []).map((c) => [c.id, c.name]));
+    const missionTitleById = new Map((missions ?? []).map((m) => [m.id, m.title]));
+
+    // Merge and deduplicate product barcodes
+    const barcodeMap = new Map<string, any>();
+    for (const p of products ?? []) {
+      if (p.barcode) {
+        barcodeMap.set(p.barcode, {
+          id: p.id,
+          name: p.name,
+          barcode: p.barcode,
+          price: p.price,
+          package_size: p.weight_text,
+          category: p.category || "Produce",
+          mission_product_id: null
+        });
+      }
+    }
+    for (const mp of missionProducts ?? []) {
+      if (mp.barcode) {
+        const prev = barcodeMap.get(mp.barcode);
+        barcodeMap.set(mp.barcode, {
+          id: prev?.id || mp.id,
+          name: mp.name,
+          barcode: mp.barcode,
+          price: mp.price_cents ? mp.price_cents / 100 : prev?.price ?? 1.0,
+          package_size: mp.package_size || prev?.package_size || "1 each",
+          category: prev?.category || "Mission Produce",
+          mission_id: mp.mission_id,
+          mission_title: missionTitleById.get(mp.mission_id) || "Assigned Mission",
+          mission_product_id: mp.id
+        });
+      }
+    }
+
+    content = (
+      <QrBarcodeManagementView
+        role={role as "admin" | "teacher" | "store"}
+        products={Array.from(barcodeMap.values())}
+        missions={(missions ?? []).map((m) => ({
+          id: m.id,
+          title: m.title,
+          number: m.mission_number ?? 1,
+          version: m.current_version ?? 1,
+          status: m.status,
+          minutes: m.estimated_minutes ?? 12
+        }))}
+        students={(students ?? []).map((s) => ({
+          id: s.id,
+          name: `${s.first_name} ${s.last_initial ?? ""}`.trim(),
+          room: classNameById.get(s.class_id) ?? "Kindergarten",
+          grade: s.grade_level,
+          active: s.is_active
+        }))}
+        stores={(stores ?? []).map((st) => ({
+          id: st.id,
+          name: st.name,
+          active: st.is_active
+        }))}
+      />
+    );
   } else if (role === "admin") {
     if (["users", "schools", "stores", "reports"].includes(currentSlug)) {
       const [

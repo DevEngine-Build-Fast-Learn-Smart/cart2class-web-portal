@@ -17,6 +17,7 @@ const headerNav: Record<Role, { name: string; href: string }[]> = {
     { name: "Users", href: "/admin/users" },
     { name: "Stores", href: "/admin/stores" },
     { name: "Missions", href: "/admin/missions" },
+    { name: "QR & Barcodes", href: "/admin/barcodes" },
     { name: "Library", href: "/admin/library" },
     { name: "Reports", href: "/admin/reports" }
   ],
@@ -25,6 +26,7 @@ const headerNav: Record<Role, { name: string; href: string }[]> = {
     { name: "Classes", href: "/teacher/classes" },
     { name: "Students", href: "/teacher/students" },
     { name: "Missions", href: "/teacher/missions" },
+    { name: "QR & Barcodes", href: "/teacher/barcodes" },
     { name: "Library", href: "/teacher/library" },
     { name: "Reviews", href: "/teacher/recordings" }
   ],
@@ -38,6 +40,7 @@ const headerNav: Record<Role, { name: string; href: string }[]> = {
   store: [
     { name: "Overview", href: "/store" },
     { name: "Check-in", href: "/store/check-in" },
+    { name: "QR & Barcodes", href: "/store/barcodes" },
     { name: "Products", href: "/store/products" },
     { name: "Participation", href: "/store/participation" },
     { name: "Rewards", href: "/store/rewards" },
