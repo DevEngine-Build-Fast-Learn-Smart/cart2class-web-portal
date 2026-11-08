@@ -40,8 +40,35 @@ export async function AdminSectionView({ slug, supabase }: { slug: string; supab
       }
       const eligible = rows.filter((row) => row.status === "published" && (row.sharing_status === "approved" || row.sharing_status === "featured"));
       const columns = [{ key: "title", label: "Mission" }, { key: "status", label: "Publication", render: (row: Row) => <Badge tone={statusTone(row.status)}>{text(row.status)}</Badge> }, { key: "sharing_status", label: "Library", render: (row: Row) => <Badge tone={statusTone(row.sharing_status)}>{text(row.sharing_status)}</Badge> }, { key: "current_version", label: "Version", render: (row: Row) => `v${text(row.current_version)}` }, { key: "estimated_minutes", label: "Duration", render: (row: Row) => `${text(row.estimated_minutes)} min` }, { key: "id", label: "Actions", render: (row: Row) => <div className="flex flex-wrap gap-2">{row.sharing_status === "approved" && row.status !== "published" && <form action={publishMission}><input type="hidden" name="missionId" value={text(row.id)} /><button className="rounded-lg bg-navy px-2 py-1.5 text-xs font-bold text-white">Publish</button></form>}{row.status === "published" && (row.sharing_status === "approved" || row.sharing_status === "featured") && <QrExportButton compact type="mission" target={{ id: text(row.id), label: text(row.title), subtitle: `Grades ${text(row.grade_min)}–${text(row.grade_max)} · Mission v${text(row.current_version)}` }} />}</div> }];
-      const { data: products } = await supabase.from("products").select("id,name,barcode,barcode_symbology,category").not("barcode", "is", null).order("name");
-      return <div className="space-y-5"><div className="flex justify-end"><BulkQrSheetButton type="mission" label="Published mission QR codes" targets={eligible.map((row) => ({ id: text(row.id), label: text(row.title), subtitle: `Mission QR · v${text(row.current_version)}` }))} /></div><DataTable rows={rows} empty="No missions are available yet." columns={columns} /><section className="panel p-5"><h2 className="font-extrabold">Educational product barcodes</h2><p className="mt-1 text-sm text-muted">Print scannable Code128 labels for approved demo and educational product activities.</p><div className="mt-4 grid gap-4 lg:grid-cols-2">{(products ?? []).map((product) => <BarcodeExportButton key={product.id} value={product.barcode!} label={product.name} subtitle={`${product.category ?? "Educational product"} · ${product.barcode_symbology}`} symbology={product.barcode_symbology as "CODE128" | "EAN13" | "UPC"} />)}</div></section></div>;
+      const [{ data: products }, { data: missionProducts }] = await Promise.all([
+        supabase.from("products").select("id,name,barcode,barcode_symbology,category").not("barcode", "is", null).order("name"),
+        supabase.from("mission_products").select("id,name,barcode").not("barcode", "is", null).order("name")
+      ]);
+      const barcodeMap = new Map<string, { id: string; name: string; barcode: string; barcode_symbology: string; category?: string }>();
+      for (const p of products ?? []) {
+        if (p.barcode) {
+          barcodeMap.set(p.barcode, {
+            id: p.id,
+            name: p.name,
+            barcode: p.barcode,
+            barcode_symbology: p.barcode_symbology || "CODE128",
+            category: p.category || "Educational product"
+          });
+        }
+      }
+      for (const mp of missionProducts ?? []) {
+        if (mp.barcode && !barcodeMap.has(mp.barcode)) {
+          barcodeMap.set(mp.barcode, {
+            id: mp.id,
+            name: mp.name,
+            barcode: mp.barcode,
+            barcode_symbology: "CODE128",
+            category: "Mission Produce"
+          });
+        }
+      }
+      const combinedProducts = Array.from(barcodeMap.values());
+      return <div className="space-y-5"><div className="flex justify-end"><BulkQrSheetButton type="mission" label="Published mission QR codes" targets={eligible.map((row) => ({ id: text(row.id), label: text(row.title), subtitle: `Mission QR · v${text(row.current_version)}` }))} /></div><DataTable rows={rows} empty="No missions are available yet." columns={columns} /><section className="panel p-5"><h2 className="font-extrabold">Educational product barcodes ({combinedProducts.length})</h2><p className="mt-1 text-sm text-muted">Print scannable Code128 labels for approved demo, store, and educational product activities.</p><div className="mt-4 grid gap-4 lg:grid-cols-2">{combinedProducts.map((product) => <BarcodeExportButton key={product.barcode} value={product.barcode} label={product.name} subtitle={`${product.category ?? "Educational product"} · ${product.barcode_symbology}`} symbology={product.barcode_symbology as "CODE128" | "EAN13" | "UPC"} />)}</div></section></div>;
     }
     if (slug === "settings") { const { data } = await supabase.from("organizations").select("id,name,slug,created_at").order("name"); return <DataTable rows={(data ?? []) as Row[]} empty="No organization settings are available." columns={[{ key: "name", label: "Organization" }, { key: "slug", label: "Identifier" }, { key: "created_at", label: "Created" }]} />; }
     const [schools, classes, students, stores] = await Promise.all([supabase.from("schools").select("id", { count: "exact", head: true }), supabase.from("classes").select("id", { count: "exact", head: true }), supabase.from("students").select("id", { count: "exact", head: true }), supabase.from("stores").select("id", { count: "exact", head: true })]); return <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[["Schools", schools.count], ["Classes", classes.count], ["Students", students.count], ["Partner stores", stores.count]].map(([label, value]) => <article className="panel p-5" key={String(label)}><p className="text-sm font-bold text-muted">{label}</p><p className="metric-value mt-2">{value ?? 0}</p></article>)}</div>;

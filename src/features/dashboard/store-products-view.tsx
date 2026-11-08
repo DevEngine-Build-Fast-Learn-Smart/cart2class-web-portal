@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { BarcodeExportButton } from "@/components/shared/code-export";
 import { archiveStoreProduct, saveStoreProduct } from "./workflow-actions";
 
 type ProductListing = { listing_id: string; store_id: string; product_id: string; name: string; barcode: string | null; barcode_symbology: string; category: string | null; description: string | null; brand: string | null; sku: string | null; price: number | null; currency: string; package_size: string | null; weight_text: string | null; image_path: string | null; is_available: boolean; is_archived: boolean; updated_at: string };
@@ -11,7 +12,166 @@ function ProductForm({ storeId, listing }: { storeId: string; listing?: ProductL
 }
 
 export async function StoreProductsView({ supabase }: { supabase: SupabaseClient }) {
-  const [{ data: stores }, { data, error }] = await Promise.all([supabase.from("stores").select("id,name").eq("is_active", true).order("name"), supabase.rpc("my_store_product_listings")]);
+  const [{ data: stores }, { data, error }, { data: missionProducts }] = await Promise.all([
+    supabase.from("stores").select("id,name").eq("is_active", true).order("name"),
+    supabase.rpc("my_store_product_listings"),
+    supabase.from("mission_products").select("id,name,barcode,price_cents,package_size").not("barcode", "is", null).order("name")
+  ]);
   const listings = (data ?? []) as ProductListing[];
-  return <main className="page-shell"><p className="eyebrow">Store partner portal</p><h1 className="mt-1 text-3xl font-extrabold">Products</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-muted">Manage only this store’s listings, prices, package details, availability, and barcode mappings. Shared product identity remains protected from other stores.</p><section className="panel mt-7 p-6"><h2 className="font-extrabold">Add a product listing</h2><p className="mt-1 text-sm text-muted">Choose the authorized branch for this listing. Existing barcode values are safely reused instead of creating duplicates.</p>{stores?.length ? <div className="mt-5">{stores.map((store) => <details key={store.id} className="rounded-xl border bg-slate-50 p-4"><summary className="cursor-pointer font-bold">Add product to {store.name}</summary><div className="mt-5"><ProductForm storeId={store.id} /></div></details>)}</div> : <p className="mt-4 text-sm text-muted">No authorized branch is available.</p>}</section><section className="mt-6 grid gap-4 xl:grid-cols-2">{error ? <EmptyState title="Products are unavailable" description="Please refresh or contact an A.L.M.A. administrator if the issue continues." /> : listings.length ? listings.map((listing) => <article className="panel overflow-hidden p-5" key={listing.listing_id}><div className="flex items-start justify-between gap-4"><div className="flex min-w-0 gap-4">{listing.image_path ? <img src={listing.image_path} alt="" className="h-16 w-16 shrink-0 rounded-xl border bg-slate-50 object-cover" /> : <div className="grid h-16 w-16 shrink-0 place-items-center rounded-xl bg-blue-50 text-xs font-bold text-brand">Product</div>}<div><h2 className="truncate font-extrabold">{listing.name}</h2><p className="mt-1 text-sm text-muted">{listing.brand ?? listing.category ?? "Uncategorised"} · {listing.barcode ? `${listing.barcode_symbology}: ${listing.barcode}` : "No barcode"}</p></div></div><Badge tone={listing.is_archived ? "slate" : listing.is_available ? "green" : "amber"}>{listing.is_archived ? "Archived" : listing.is_available ? "Available" : "Unavailable"}</Badge></div><div className="mt-4 grid grid-cols-2 gap-3 text-sm"><p><span className="font-bold">Price:</span> {listing.price == null ? "Not set" : `${listing.currency} ${listing.price}`}</p><p><span className="font-bold">Package:</span> {listing.package_size ?? listing.weight_text ?? "Not set"}</p><p><span className="font-bold">SKU:</span> {listing.sku ?? "—"}</p><p><span className="font-bold">Updated:</span> {formatDate(listing.updated_at)}</p></div>{listing.description && <p className="mt-4 text-sm leading-6 text-muted">{listing.description}</p>} {!listing.is_archived && <details className="mt-5 rounded-xl border bg-slate-50 p-4"><summary className="cursor-pointer text-sm font-bold text-brand">Edit listing</summary><div className="mt-4"><ProductForm storeId={listing.store_id} listing={listing} /></div></details>}{!listing.is_archived && <form action={archiveStoreProduct} className="mt-4"><input type="hidden" name="listingId" value={listing.listing_id} /><button className="text-sm font-bold text-red-700 hover:underline">Archive product</button></form>}</article>) : <EmptyState title="No store products" description="Add a product listing when your branch is ready. No product data is fabricated." />}</section></main>;
+
+  // Merge any barcodes from mission products that should be scannable in store aisles
+  const missionBarcodes = (missionProducts ?? []).filter((mp) => mp.barcode);
+
+  return (
+    <main className="page-shell">
+      <p className="eyebrow">Store partner portal</p>
+      <h1 className="mt-1 text-3xl font-extrabold">Products</h1>
+      <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">
+        Manage only this store’s listings, prices, package details, availability, and barcode mappings. Shared product identity remains protected from other stores.
+      </p>
+
+      {/* Mission Educational Barcodes for Aisles */}
+      {missionBarcodes.length > 0 && (
+        <section className="panel mt-7 p-6 border-2 border-teal-200 bg-teal-50/30">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-extrabold text-navy">Educational Mission Barcodes ({missionBarcodes.length})</h2>
+              <p className="mt-1 text-sm text-muted">
+                Print these scannable Code128 barcodes to place on produce displays or keep at customer service for students doing store missions.
+              </p>
+            </div>
+          </div>
+          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+            {missionBarcodes.map((mp) => (
+              <BarcodeExportButton
+                key={mp.id}
+                value={mp.barcode!}
+                label={mp.name}
+                subtitle={`Mission Produce · $${((mp.price_cents || 100) / 100).toFixed(2)} · ${mp.package_size || "1 each"}`}
+                symbology="CODE128"
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="panel mt-7 p-6">
+        <h2 className="font-extrabold">Add a product listing</h2>
+        <p className="mt-1 text-sm text-muted">
+          Choose the authorized branch for this listing. Existing barcode values are safely reused instead of creating duplicates.
+        </p>
+        {stores?.length ? (
+          <div className="mt-5">
+            {stores.map((store) => (
+              <details key={store.id} className="rounded-xl border bg-slate-50 p-4">
+                <summary className="cursor-pointer font-bold">Add product to {store.name}</summary>
+                <div className="mt-5">
+                  <ProductForm storeId={store.id} />
+                </div>
+              </details>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-muted">No authorized branch is available.</p>
+        )}
+      </section>
+
+      <section className="mt-6 grid gap-4 xl:grid-cols-2">
+        {error ? (
+          <EmptyState
+            title="Products are unavailable"
+            description="Please refresh or contact an A.L.M.A. administrator if the issue continues."
+          />
+        ) : listings.length ? (
+          listings.map((listing) => (
+            <article className="panel overflow-hidden p-5 flex flex-col justify-between" key={listing.listing_id}>
+              <div>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex min-w-0 gap-4">
+                    {listing.image_path ? (
+                      <img
+                        src={listing.image_path}
+                        alt=""
+                        className="h-16 w-16 shrink-0 rounded-xl border bg-slate-50 object-cover"
+                      />
+                    ) : (
+                      <div className="grid h-16 w-16 shrink-0 place-items-center rounded-xl bg-blue-50 text-xs font-bold text-brand">
+                        Product
+                      </div>
+                    )}
+                    <div>
+                      <h2 className="truncate font-extrabold text-lg">{listing.name}</h2>
+                      <p className="mt-1 text-sm text-muted">
+                        {listing.brand ?? listing.category ?? "Uncategorised"} ·{" "}
+                        {listing.barcode ? `${listing.barcode_symbology}: ${listing.barcode}` : "No barcode"}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge tone={listing.is_archived ? "slate" : listing.is_available ? "green" : "amber"}>
+                    {listing.is_archived ? "Archived" : listing.is_available ? "Available" : "Unavailable"}
+                  </Badge>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <p>
+                    <span className="font-bold">Price:</span>{" "}
+                    {listing.price == null ? "Not set" : `${listing.currency} ${listing.price}`}
+                  </p>
+                  <p>
+                    <span className="font-bold">Package:</span>{" "}
+                    {listing.package_size ?? listing.weight_text ?? "Not set"}
+                  </p>
+                  <p>
+                    <span className="font-bold">SKU:</span> {listing.sku ?? "—"}
+                  </p>
+                  <p>
+                    <span className="font-bold">Updated:</span> {formatDate(listing.updated_at)}
+                  </p>
+                </div>
+
+                {listing.description && (
+                  <p className="mt-4 text-sm leading-6 text-muted">{listing.description}</p>
+                )}
+
+                {/* Scannable Barcode */}
+                {listing.barcode && (
+                  <div className="mt-4 pt-3 border-t">
+                    <p className="text-xs font-bold text-muted mb-2">Printable Barcode Label:</p>
+                    <BarcodeExportButton
+                      value={listing.barcode}
+                      label={listing.name}
+                      subtitle={`${listing.category ?? "Store product"} · ${listing.barcode_symbology || "CODE128"}`}
+                      symbology={(listing.barcode_symbology as any) || "CODE128"}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-5 pt-3 border-t">
+                {!listing.is_archived && (
+                  <details className="rounded-xl border bg-slate-50 p-3">
+                    <summary className="cursor-pointer text-sm font-bold text-brand">Edit listing</summary>
+                    <div className="mt-4">
+                      <ProductForm storeId={listing.store_id} listing={listing} />
+                    </div>
+                  </details>
+                )}
+                {!listing.is_archived && (
+                  <form action={archiveStoreProduct} className="mt-3">
+                    <input type="hidden" name="listingId" value={listing.listing_id} />
+                    <button className="text-xs font-bold text-red-700 hover:underline">Archive product</button>
+                  </form>
+                )}
+              </div>
+            </article>
+          ))
+        ) : (
+          <EmptyState
+            title="No custom store product listings"
+            description="Add a product listing when your branch is ready. Educational mission barcodes are ready above."
+          />
+        )}
+      </section>
+    </main>
+  );
 }

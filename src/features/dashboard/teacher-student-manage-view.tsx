@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { BulkQrSheetButton, QrExportButton } from "@/components/shared/code-export";
+import { BarcodeExportButton, BulkQrSheetButton, QrExportButton } from "@/components/shared/code-export";
 import { ImageUploadField } from "@/components/shared/image-upload-field";
 import { EntityAvatar } from "@/components/shared/entity-avatar";
 import { deactivateTeacherStudent, saveTeacherStudent } from "./workflow-actions";
@@ -69,12 +69,13 @@ function StudentForm({ classes, student }: { classes: Classroom[]; student?: Stu
 }
 
 export async function TeacherStudentManageView({ supabase }: { supabase: SupabaseClient }) {
-  const [{ data: students }, { data: classes }] = await Promise.all([
+  const [{ data: students }, { data: classes }, { data: missionProducts }] = await Promise.all([
     supabase
       .from("students")
       .select("id,first_name,last_initial,grade_level,class_id,parent_invite_code,card_code,avatar_url,is_active")
       .order("first_name"),
-    supabase.from("classes").select("id,name,grade_level").order("grade_level")
+    supabase.from("classes").select("id,name,grade_level").order("grade_level"),
+    supabase.from("mission_products").select("id,name,barcode").not("barcode", "is", null).order("name")
   ]);
 
   const roster = (students ?? []) as Student[];
@@ -183,6 +184,26 @@ export async function TeacherStudentManageView({ supabase }: { supabase: Supabas
                   ))}
                 </div>
               </section>
+
+              {missionProducts && missionProducts.length > 0 && (
+                <section className="panel mt-6 p-5">
+                  <h2 className="font-extrabold">Educational Product Barcodes ({missionProducts.length})</h2>
+                  <p className="mt-1 text-sm text-muted">
+                    Print or preview scannable Code128 barcodes for in-class learning or supermarket field trips.
+                  </p>
+                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                    {missionProducts.map((p) => (
+                      <BarcodeExportButton
+                        key={p.id}
+                        value={p.barcode!}
+                        label={p.name}
+                        subtitle="Mission Product · Code128"
+                        symbology="CODE128"
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
             </>
           ) : (
             <div className="mt-7">

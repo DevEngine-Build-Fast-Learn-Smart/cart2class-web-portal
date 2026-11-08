@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { BarcodeExportButton } from "@/components/shared/code-export";
 import { OptionPictureManager } from "./option-picture-manager";
 import {
   saveStage1Question,
@@ -565,6 +566,19 @@ export function MissionBuilderView({
                     </div>
                   </div>
 
+                  {/* Scannable Barcode Label & Download */}
+                  {p.barcode ? (
+                    <div className="mt-3 pt-3 border-t">
+                      <p className="text-xs font-bold text-muted mb-2">Scannable Barcode Label (Scan with App):</p>
+                      <BarcodeExportButton
+                        value={p.barcode}
+                        label={p.name}
+                        subtitle={`Code128 · ${(p.price_cents / 100).toFixed(2)} USD`}
+                        symbology="CODE128"
+                      />
+                    </div>
+                  ) : null}
+
                   <div className="flex items-center justify-end gap-2 pt-3 mt-3 border-t">
                     <Button
                       type="button"
@@ -919,9 +933,19 @@ export function MissionBuilderView({
                 <span className="text-xs font-bold text-teal-700 uppercase">Target Item: {products[0]?.name || "Corn"}</span>
                 <h3 className="text-xl font-black text-navy">Find and scan the barcode</h3>
                 <p className="text-sm text-muted">{products[0]?.instructions || "Scan the barcode on the produce label."}</p>
-                <div className="panel bg-slate-50 p-4 text-center border-2 border-dashed border-teal-300 rounded-xl">
-                  <p className="font-mono font-bold text-lg text-ink">UPC: {products[0]?.barcode || "012345678905"}</p>
-                  <p className="text-xs text-muted mt-1">${((products[0]?.price_cents || 100) / 100).toFixed(2)} · {products[0]?.weight_grams || 500}g</p>
+                <div className="panel bg-slate-50 p-4 text-center border-2 border-dashed border-teal-300 rounded-xl space-y-3">
+                  <p className="font-mono font-bold text-lg text-ink">UPC / Barcode: {products[0]?.barcode || "012345678905"}</p>
+                  <p className="text-xs text-muted">${((products[0]?.price_cents || 100) / 100).toFixed(2)} · {products[0]?.weight_grams || 500}g</p>
+                  {(products[0]?.barcode || "012345678905") && (
+                    <div className="max-w-xs mx-auto text-left">
+                      <BarcodeExportButton
+                        value={products[0]?.barcode || "012345678905"}
+                        label={products[0]?.name || "Corn"}
+                        subtitle="Test Scannable Barcode · Code128"
+                        symbology="CODE128"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex justify-between">
