@@ -9,10 +9,18 @@ export async function requireRole(expected: Role) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
   const [{ data: profile }, { data: memberships }] = await Promise.all([
-    supabase.from("profiles").select("id,display_name,account_status").eq("id", user.id).single(),
+    supabase.from("profiles").select("*").eq("id", user.id).single(),
     supabase.from("role_memberships").select("role,organization_id,is_active").eq("user_id", user.id).eq("is_active", true)
   ]);
-  const typedProfile = profile as Profile | null;
+  const typedProfile: Profile | null = profile
+    ? {
+        id: profile.id,
+        display_name: profile.display_name,
+        account_status: profile.account_status,
+        avatar_url: profile.avatar_url || user.user_metadata?.avatar_url || null,
+        email: user.email || null
+      }
+    : null;
   const typedMemberships = (memberships ?? []) as Membership[];
   if (!typedProfile || typedProfile.account_status !== "active") redirect("/unauthorized?reason=disabled");
   if (!typedMemberships.some((membership) => membership.role === expected)) {

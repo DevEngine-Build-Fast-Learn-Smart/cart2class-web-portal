@@ -33,6 +33,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { QrExportButton, BulkQrSheetButton, InstantQrPreview } from "@/components/shared/code-export";
 import { ToastAlert, ConfirmDeleteModal } from "@/components/ui/dialog-alert";
+import { ImageUploadField } from "@/components/shared/image-upload-field";
+import { EntityAvatar } from "@/components/shared/entity-avatar";
 import {
   createPortalUser,
   updatePortalUser,
@@ -388,6 +390,15 @@ export function AdminManagementView({
                   </select>
                 </label>
               )}
+
+              <div className="md:col-span-2 lg:col-span-3">
+                <ImageUploadField
+                  label="Profile Picture (Optional)"
+                  fileInputName="avatarFile"
+                  urlInputName="avatarUrl"
+                  helpText="Optional · Max 5MB (Upload file or paste web image link)"
+                />
+              </div>
             </div>
             <div className="flex gap-3 pt-2">
               <Button type="submit" className="bg-navy text-white font-bold h-9 px-4 text-xs">Create Account</Button>
@@ -434,6 +445,16 @@ export function AdminManagementView({
                   ))}
                 </select>
               </label>
+
+              <div className="md:col-span-2 lg:col-span-4">
+                <ImageUploadField
+                  label="Learner Profile Photo (Optional)"
+                  fileInputName="avatarFile"
+                  urlInputName="avatarUrl"
+                  shape="circle"
+                  helpText="Optional · Max 5MB (Upload file or paste web image link)"
+                />
+              </div>
             </div>
             <div className="flex gap-3 pt-2">
               <Button type="submit" className="bg-navy text-white font-bold h-9 px-4 text-xs">Enroll Student</Button>
@@ -444,8 +465,8 @@ export function AdminManagementView({
 
         {/* Student QR Login Card Preview Modal */}
         {previewCardStudent && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-            <div className="w-full max-w-md panel bg-white p-6 shadow-2xl border-2 border-brand/30 space-y-5">
+          <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+            <div className="w-full max-w-md max-h-[90vh] overflow-y-auto my-auto panel bg-white p-6 shadow-2xl border-2 border-brand/30 space-y-5">
               <div className="flex items-center justify-between border-b pb-3">
                 <div className="flex items-center gap-2">
                   <QrCode className="h-5 w-5 text-brand" />
@@ -554,9 +575,7 @@ export function AdminManagementView({
                     <tr key={p.id} className="hover:bg-slate-50/70">
                       <td className="px-5 py-3.5 font-bold text-ink">
                         <div className="flex items-center gap-3">
-                          <span className="grid h-9 w-9 place-items-center rounded-xl bg-slate-100 font-black text-xs text-slate-700">
-                            {p.display_name.slice(0, 2).toUpperCase()}
-                          </span>
+                          <EntityAvatar src={p.avatar_url} alt={p.display_name} kind="user" size="md" shape="rounded" />
                           <span>{p.display_name}</span>
                         </div>
                       </td>
@@ -645,9 +664,7 @@ export function AdminManagementView({
                     <tr key={st.id} className="hover:bg-slate-50/70">
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-3">
-                          <span className="grid h-9 w-9 place-items-center rounded-xl bg-blue-50 font-black text-xs text-brand border border-blue-100">
-                            {st.first_name[0]}{st.last_initial ?? ""}
-                          </span>
+                          <EntityAvatar src={st.avatar_url} alt={`${st.first_name} ${st.last_initial ?? ""}`} kind="student" size="md" shape="rounded" />
                           <div>
                             <span className="font-bold text-ink block text-[15px]">{st.first_name} {st.last_initial ?? ""}</span>
                             <span className="text-[11px] text-muted font-mono">{st.id.slice(0, 8)}...</span>
@@ -759,8 +776,8 @@ export function AdminManagementView({
 
         {/* Edit User Account Modal */}
         {editingUser && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/60 p-4 backdrop-blur-xs">
-            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border space-y-4">
+          <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-navy/70 p-4 sm:p-6 backdrop-blur-sm overflow-y-auto">
+            <div className="w-full max-w-md max-h-[90vh] overflow-y-auto my-auto rounded-2xl bg-white p-6 shadow-2xl border space-y-4">
               <div className="flex items-center justify-between border-b pb-3">
                 <h3 className="text-lg font-black text-navy">Edit Account: {editingUser.display_name}</h3>
                 <button onClick={() => setEditingUser(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
@@ -809,6 +826,14 @@ export function AdminManagementView({
                     className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
                   />
                 </label>
+                <ImageUploadField
+                  label="Profile Picture"
+                  fileInputName="avatarFile"
+                  urlInputName="avatarUrl"
+                  initialUrl={editingUser.avatar_url || null}
+                  shape="circle"
+                  helpText="Optional · Max 5MB (Upload file or paste web image link)"
+                />
                 <div className="flex justify-end gap-2 pt-2 border-t">
                   <Button type="button" variant="secondary" onClick={() => setEditingUser(null)} className="h-9 px-4 text-xs font-bold">
                     Cancel
@@ -824,8 +849,8 @@ export function AdminManagementView({
 
         {/* Edit Student Record Modal */}
         {editingStudent && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/60 p-4 backdrop-blur-xs">
-            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border space-y-4">
+          <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-navy/70 p-4 sm:p-6 backdrop-blur-sm overflow-y-auto">
+            <div className="w-full max-w-md max-h-[90vh] overflow-y-auto my-auto rounded-2xl bg-white p-6 shadow-2xl border space-y-4">
               <div className="flex items-center justify-between border-b pb-3">
                 <h3 className="text-lg font-black text-navy">Edit Learner: {editingStudent.first_name} {editingStudent.last_initial || ""}</h3>
                 <button onClick={() => setEditingStudent(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
@@ -878,6 +903,14 @@ export function AdminManagementView({
                     ))}
                   </select>
                 </label>
+                <ImageUploadField
+                  label="Learner Profile Photo"
+                  fileInputName="avatarFile"
+                  urlInputName="avatarUrl"
+                  initialUrl={editingStudent.avatar_url || null}
+                  shape="circle"
+                  helpText="Optional · Max 5MB (Upload file or paste web image link)"
+                />
                 <div className="flex justify-end gap-2 pt-2 border-t">
                   <Button type="button" variant="secondary" onClick={() => setEditingStudent(null)} className="h-9 px-4 text-xs font-bold">
                     Cancel
@@ -1038,6 +1071,16 @@ export function AdminManagementView({
                 Official Contact Phone
                 <input type="tel" name="contactPhone" placeholder="(205) 555-0192" className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal" />
               </label>
+
+              <div className="md:col-span-2 lg:col-span-3">
+                <ImageUploadField
+                  label="School Logo / Insignia"
+                  fileInputName="logoFile"
+                  urlInputName="logoUrl"
+                  shape="square"
+                  helpText="Optional · Max 5MB (Upload file or paste web image link)"
+                />
+              </div>
             </div>
             <div className="flex gap-3 pt-2">
               <Button type="submit" className="bg-navy text-white font-bold h-9 px-4 text-xs">Verify & Save School</Button>
@@ -1119,9 +1162,14 @@ export function AdminManagementView({
                   {schools.map((s) => (
                     <tr key={s.id} className="hover:bg-slate-50/70">
                       <td className="px-5 py-3.5">
-                        <span className="font-bold text-ink block text-[15px]">{s.name}</span>
-                        <span className="text-xs text-muted">{s.district_name || "District Partner"} · NCES: {s.nces_id || "010000500123"}</span>
-                        <span className="text-xs text-slate-400 block mt-0.5">{s.address}</span>
+                        <div className="flex items-center gap-3">
+                          <EntityAvatar src={s.logo_url} alt={s.name} kind="school" size="md" shape="square" />
+                          <div>
+                            <span className="font-bold text-ink block text-[15px]">{s.name}</span>
+                            <span className="text-xs text-muted">{s.district_name || "District Partner"} · NCES: {s.nces_id || "010000500123"}</span>
+                            <span className="text-xs text-slate-400 block mt-0.5">{s.address}</span>
+                          </div>
+                        </div>
                       </td>
                       <td className="px-5 py-3.5 text-xs text-muted">
                         <span className="font-bold text-slate-700 block">{s.principal_name || "Dr. Sarah Jenkins"}</span>
@@ -1233,8 +1281,8 @@ export function AdminManagementView({
 
         {/* Edit School Modal (Legal Claim Details) */}
         {editingSchool && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/60 p-4 backdrop-blur-xs overflow-y-auto">
-            <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl border space-y-4 my-8">
+          <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-navy/70 p-4 sm:p-6 backdrop-blur-sm overflow-y-auto">
+            <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto my-auto rounded-2xl bg-white p-6 shadow-2xl border space-y-4">
               <div className="flex items-center justify-between border-b pb-3">
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="h-5 w-5 text-teal-600" />
@@ -1353,6 +1401,15 @@ export function AdminManagementView({
                   </label>
                 </div>
 
+                <ImageUploadField
+                  label="School Logo / Insignia"
+                  fileInputName="logoFile"
+                  urlInputName="logoUrl"
+                  initialUrl={editingSchool.logo_url || null}
+                  shape="square"
+                  helpText="Optional · Max 5MB (Upload file or paste web image link)"
+                />
+
                 <div className="flex items-center gap-4 pt-2">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -1392,8 +1449,8 @@ export function AdminManagementView({
 
         {/* Edit Classroom Modal */}
         {editingClass && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/60 p-4 backdrop-blur-xs">
-            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border space-y-4">
+          <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-navy/70 p-4 sm:p-6 backdrop-blur-sm overflow-y-auto">
+            <div className="w-full max-w-md max-h-[90vh] overflow-y-auto my-auto rounded-2xl bg-white p-6 shadow-2xl border space-y-4">
               <div className="flex items-center justify-between border-b pb-3">
                 <h3 className="text-lg font-black text-navy">Edit Classroom: {editingClass.name}</h3>
                 <button onClick={() => setEditingClass(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
@@ -1590,6 +1647,16 @@ export function AdminManagementView({
                 Business Hours
                 <input type="text" name="businessHours" placeholder="e.g. 8:00 AM - 9:00 PM" className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal" />
               </label>
+
+              <div className="md:col-span-2 lg:col-span-3">
+                <ImageUploadField
+                  label="Store Logo / Front Image"
+                  fileInputName="logoFile"
+                  urlInputName="logoUrl"
+                  shape="square"
+                  helpText="Optional · Max 5MB (Upload file or paste web image link)"
+                />
+              </div>
             </div>
             <div className="flex gap-3 pt-2">
               <Button type="submit" className="bg-navy text-white font-bold h-9 px-4 text-xs">Save Store</Button>
@@ -1622,8 +1689,13 @@ export function AdminManagementView({
                 {stores.map((s) => (
                   <tr key={s.id} className="hover:bg-slate-50/70">
                     <td className="px-5 py-3.5">
-                      <span className="font-bold text-ink block text-[15px]">{s.name}</span>
-                      <span className="text-xs text-muted font-mono">ID: {s.id.slice(0, 8)}...</span>
+                      <div className="flex items-center gap-3">
+                        <EntityAvatar src={s.logo_url} alt={s.name} kind="store" size="md" shape="square" />
+                        <div>
+                          <span className="font-bold text-ink block text-[15px]">{s.name}</span>
+                          <span className="text-xs text-muted font-mono">ID: {s.id.slice(0, 8)}...</span>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-5 py-3.5">
                       <span className="font-bold text-ink block">{s.representative_name || "Manager"}</span>
@@ -1708,7 +1780,10 @@ export function AdminManagementView({
 
             <div className="rounded-2xl border-2 border-dashed border-brand/30 bg-white p-6 text-center space-y-4 shadow-sm">
               <span className="eyebrow text-brand font-black">CART2CLASS LEARNING PARTNER</span>
-              <h4 className="text-3xl font-black text-navy">{stores[0]?.name || "Green Basket Market"}</h4>
+              <div className="flex flex-col items-center justify-center gap-2">
+                <EntityAvatar src={stores[0]?.logo_url} alt={stores[0]?.name || "Store"} kind="store" size="lg" shape="square" />
+                <h4 className="text-3xl font-black text-navy">{stores[0]?.name || "Green Basket Market"}</h4>
+              </div>
               <p className="text-xs text-muted max-w-sm mx-auto leading-relaxed">
                 Welcome young shoppers! Point your Cart2Class Student App camera at this sign to verify your store visit and begin your aisle mission.
               </p>
@@ -1768,8 +1843,8 @@ export function AdminManagementView({
 
         {/* Edit Store Partner Modal */}
         {editingStore && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/60 p-4 backdrop-blur-xs">
-            <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border space-y-4">
+          <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-navy/70 p-4 sm:p-6 backdrop-blur-sm overflow-y-auto">
+            <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto my-auto rounded-2xl bg-white p-6 shadow-2xl border space-y-4">
               <div className="flex items-center justify-between border-b pb-3">
                 <h3 className="text-lg font-black text-navy">Edit Store: {editingStore.name}</h3>
                 <button onClick={() => setEditingStore(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
@@ -1837,6 +1912,14 @@ export function AdminManagementView({
                     className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
                   />
                 </label>
+                <ImageUploadField
+                  label="Store Logo / Front Image"
+                  fileInputName="logoFile"
+                  urlInputName="logoUrl"
+                  initialUrl={editingStore.logo_url || null}
+                  shape="square"
+                  helpText="Optional · Max 5MB (Upload file or paste web image link)"
+                />
                 <label className="flex items-center gap-2 cursor-pointer pt-1">
                   <input
                     type="checkbox"

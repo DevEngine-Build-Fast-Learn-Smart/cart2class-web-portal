@@ -1,5 +1,20 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { ShieldCheck, UserCheck, GraduationCap, Building2, FileText, Clock, ChevronDown, Activity, Info } from "lucide-react";
+import {
+  ShieldCheck,
+  UserCheck,
+  GraduationCap,
+  Building2,
+  FileText,
+  Clock,
+  ChevronDown,
+  Activity,
+  Info,
+  LogIn,
+  Award,
+  Smartphone,
+  CheckCircle2,
+  UserPlus
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { publishPolicyVersion, savePolicyVersion, updateDeletionRequest } from "./actions";
@@ -16,27 +31,91 @@ const formatDate = (value: string | null) =>
     : "—";
 
 function getAuditMeta(action: string, entityType: string) {
+  if (action === "student.login") {
+    return {
+      title: "Learner App Sign-In (QR Card)",
+      icon: LogIn,
+      color: "text-cyan-700 bg-cyan-50 border-cyan-200",
+      badgeTone: "teal" as const
+    };
+  }
+  if (action === "student.mission_completed") {
+    return {
+      title: "Mission Completed (Mobile App)",
+      icon: Award,
+      color: "text-emerald-700 bg-emerald-50 border-emerald-200",
+      badgeTone: "green" as const
+    };
+  }
+  if (action.includes("activity") || action === "student.sync_activity") {
+    return {
+      title: "Learner Mobile Progress Synced",
+      icon: Smartphone,
+      color: "text-indigo-700 bg-indigo-50 border-indigo-200",
+      badgeTone: "purple" as const
+    };
+  }
+  if (action === "student.created") {
+    return {
+      title: "Learner Enrolled (QR Card Generated)",
+      icon: GraduationCap,
+      color: "text-blue-700 bg-blue-50 border-blue-200",
+      badgeTone: "blue" as const
+    };
+  }
+  if (action === "student.updated") {
+    return {
+      title: "Learner Record Updated",
+      icon: GraduationCap,
+      color: "text-blue-700 bg-blue-50 border-blue-200",
+      badgeTone: "blue" as const
+    };
+  }
   if (action.includes("student")) {
     return {
-      title: action === "student.updated" ? "Learner Record Updated" : "Learner Roster Event",
+      title: "Learner Roster Event",
       icon: GraduationCap,
-      color: "text-blue-600 bg-blue-50 border-blue-200",
+      color: "text-blue-700 bg-blue-50 border-blue-200",
       badgeTone: "blue" as const
+    };
+  }
+  if (action === "user.created") {
+    return {
+      title: "Authorized Account Created",
+      icon: UserPlus,
+      color: "text-purple-700 bg-purple-50 border-purple-200",
+      badgeTone: "purple" as const
+    };
+  }
+  if (action === "user.updated") {
+    return {
+      title: "User Profile Updated",
+      icon: UserCheck,
+      color: "text-purple-700 bg-purple-50 border-purple-200",
+      badgeTone: "purple" as const
     };
   }
   if (action.includes("policy")) {
     return {
       title: action === "policy.published" ? "Legal Policy Published" : "Policy Document Updated",
       icon: ShieldCheck,
-      color: "text-emerald-600 bg-emerald-50 border-emerald-200",
+      color: "text-emerald-700 bg-emerald-50 border-emerald-200",
       badgeTone: "green" as const
+    };
+  }
+  if (action.includes("school")) {
+    return {
+      title: action === "school.created" ? "Partner School Registered" : "Partner School Details Updated",
+      icon: Building2,
+      color: "text-teal-700 bg-teal-50 border-teal-200",
+      badgeTone: "teal" as const
     };
   }
   if (action.includes("store")) {
     return {
       title: "Store Partner Event",
       icon: Building2,
-      color: "text-amber-600 bg-amber-50 border-amber-200",
+      color: "text-amber-700 bg-amber-50 border-amber-200",
       badgeTone: "amber" as const
     };
   }
@@ -302,9 +381,17 @@ export async function AdminLegalView({
                         <Icon className="h-5 w-5" />
                       </div>
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="font-bold text-ink text-sm sm:text-base">{meta.title}</h3>
                           <Badge tone={meta.badgeTone}>{audit.entity_type}</Badge>
+                          {metadataObj.student_name && (
+                            <span className="inline-flex items-center gap-1 font-bold text-xs text-brand bg-brand/10 px-2 py-0.5 rounded-md">
+                              <GraduationCap className="h-3.5 w-3.5" /> Learner: {metadataObj.student_name}
+                            </span>
+                          )}
+                          {metadataObj.class_name && (
+                            <span className="text-xs text-muted font-medium">({metadataObj.class_name})</span>
+                          )}
                         </div>
                         <p className="text-xs text-muted flex items-center gap-1 mt-0.5">
                           <Clock className="h-3.5 w-3.5" /> {formatDate(audit.created_at)}

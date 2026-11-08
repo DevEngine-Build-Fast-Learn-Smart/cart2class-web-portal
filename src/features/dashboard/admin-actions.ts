@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/permissions/access";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { processImageUpload } from "@/lib/storage/upload";
 import crypto from "crypto";
 
 const refresh = (...paths: string[]) => paths.forEach((path) => revalidatePath(path));
@@ -18,10 +19,24 @@ export async function createPortalUser(formData: FormData) {
   const classId = String(formData.get("classId") ?? "").trim() || null;
   const storeId = String(formData.get("storeId") ?? "").trim() || null;
   const studentId = String(formData.get("studentId") ?? "").trim() || null;
+  const avatarFile = formData.get("avatarFile") as File | null;
+  const avatarUrl = String(formData.get("avatarUrl") ?? "").trim();
 
   if (!email || !password || !displayName) {
     return { error: "Email, password, and display name are required." };
   }
+
+  // Upload avatar if provided
+  const imgRes = await processImageUpload({
+    file: avatarFile,
+    url: avatarUrl,
+    folder: "avatars",
+    fileNamePrefix: "usr"
+  });
+  if (imgRes.error) {
+    return { error: imgRes.error };
+  }
+  const finalAvatarUrl = imgRes.url || null;
 
   const adminClient = createAdminClient();
 
@@ -33,7 +48,12 @@ export async function createPortalUser(formData: FormData) {
   const { data: authData, error: authErr } = await adminClient.auth.admin.createUser({
     email,
     password,
-    email_confirm: true
+    email_confirm: true,
+    user_metadata: {
+      full_name: displayName,
+      display_name: displayName,
+      avatar_url: finalAvatarUrl
+    }
   });
 
   if (authErr || !authData.user) {
@@ -43,11 +63,26 @@ export async function createPortalUser(formData: FormData) {
   const userId = authData.user.id;
 
   // 3. Upsert profile
-  await adminClient.from("profiles").upsert({
-    id: userId,
-    display_name: displayName,
-    account_status: "active"
-  });
+  try {
+    const profilePayload: Record<string, any> = {
+      id: userId,
+      display_name: displayName,
+      account_status: "active"
+    };
+    if (finalAvatarUrl) {
+      profilePayload.avatar_url = finalAvatarUrl;
+    }
+    const { error: profErr } = await adminClient.from("profiles").upsert(profilePayload);
+    if (profErr && profErr.message.includes("avatar_url")) {
+      await adminClient.from("profiles").upsert({
+        id: userId,
+        display_name: displayName,
+        account_status: "active"
+      });
+    }
+  } catch (err) {
+    console.error("Profile upsert error:", err);
+  }
 
   // 4. Upsert role membership
   await adminClient.from("role_memberships").upsert({
@@ -83,6 +118,21 @@ export async function createPortalUser(formData: FormData) {
     }, { onConflict: "parent_user_id,student_id" });
   }
 
+  // 6. Record audit log
+  await adminClient.from("audit_logs").insert({
+    organization_id: orgId,
+    actor_user_id: access.profile.id,
+    action: "user.created",
+    entity_type: "profile",
+    entity_id: userId,
+    metadata: {
+      display_name: displayName,
+      role,
+      email,
+      has_avatar: Boolean(finalAvatarUrl)
+    }
+  });
+
   refresh("/admin/users", "/admin");
   return { success: true };
 }
@@ -95,24 +145,80 @@ export async function updatePortalUser(formData: FormData) {
   const displayName = String(formData.get("displayName") ?? "").trim();
   const status = String(formData.get("accountStatus") ?? "active") as "active" | "disabled";
   const newPassword = String(formData.get("newPassword") ?? "").trim();
+  const avatarFile = formData.get("avatarFile") as File | null;
+  const avatarUrl = String(formData.get("avatarUrl") ?? "").trim();
+
+  // Upload avatar if provided
+  const imgRes = await processImageUpload({
+    file: avatarFile,
+    url: avatarUrl,
+    folder: "avatars",
+    fileNamePrefix: "usr"
+  });
+  if (imgRes.error) {
+    return { error: imgRes.error };
+  }
+  const finalAvatarUrl = imgRes.url !== undefined ? imgRes.url : undefined;
 
   const adminClient = createAdminClient();
 
-  if (displayName || status) {
-    await adminClient.from("profiles").update({
+  if (displayName || status || finalAvatarUrl !== undefined) {
+    const updatePayload: Record<string, any> = {
       display_name: displayName,
       account_status: status,
       updated_at: new Date().toISOString()
-    }).eq("id", userId);
+    };
+    if (finalAvatarUrl !== undefined) {
+      updatePayload.avatar_url = finalAvatarUrl;
+    }
+
+    try {
+      const { error: profErr } = await adminClient.from("profiles").update(updatePayload).eq("id", userId);
+      if (profErr && profErr.message.includes("avatar_url")) {
+        await adminClient.from("profiles").update({
+          display_name: displayName,
+          account_status: status,
+          updated_at: new Date().toISOString()
+        }).eq("id", userId);
+      }
+    } catch (err) {
+      console.error("Profile update error:", err);
+    }
 
     await adminClient.from("role_memberships").update({
       is_active: status === "active"
     }).eq("user_id", userId);
   }
 
-  if (newPassword) {
-    await adminClient.auth.admin.updateUserById(userId, { password: newPassword });
+  // Update Auth user
+  const authUpdate: Record<string, any> = {};
+  if (newPassword) authUpdate.password = newPassword;
+  if (displayName || finalAvatarUrl !== undefined) {
+    const { data: currentUser } = await adminClient.auth.admin.getUserById(userId);
+    authUpdate.user_metadata = {
+      ...(currentUser?.user?.user_metadata || {}),
+      ...(displayName ? { full_name: displayName, display_name: displayName } : {}),
+      ...(finalAvatarUrl !== undefined ? { avatar_url: finalAvatarUrl } : {})
+    };
   }
+
+  if (Object.keys(authUpdate).length > 0) {
+    await adminClient.auth.admin.updateUserById(userId, authUpdate);
+  }
+
+  // Record audit log
+  await adminClient.from("audit_logs").insert({
+    actor_user_id: access.profile.id,
+    action: "user.updated",
+    entity_type: "profile",
+    entity_id: userId,
+    metadata: {
+      display_name: displayName,
+      status,
+      password_changed: Boolean(newPassword),
+      avatar_updated: finalAvatarUrl !== undefined
+    }
+  });
 
   refresh("/admin/users", "/admin");
   return { success: true };
@@ -142,9 +248,22 @@ export async function createAdminStudent(formData: FormData) {
   const lastInitial = String(formData.get("lastInitial") ?? "").trim().toUpperCase() || null;
   const gradeLevel = Number(formData.get("gradeLevel") ?? 0);
   const classId = String(formData.get("classId") ?? "").trim();
+  const avatarFile = formData.get("avatarFile") as File | null;
+  const avatarUrl = String(formData.get("avatarUrl") ?? "").trim();
 
   if (!firstName || !classId) {
     return { error: "First name and class are required." };
+  }
+
+  // Upload avatar if provided
+  const imgRes = await processImageUpload({
+    file: avatarFile,
+    url: avatarUrl,
+    folder: "students",
+    fileNamePrefix: "stu"
+  });
+  if (imgRes.error) {
+    return { error: imgRes.error };
   }
 
   const adminClient = createAdminClient();
@@ -160,7 +279,7 @@ export async function createAdminStudent(formData: FormData) {
   const cardCode = `c2c-card:v1:stu_${cleanName}_${randomSuffix}`;
   const parentInviteCode = `C2C-PAR-${cleanName.toUpperCase()}-${randomPin}`;
 
-  const { data: newStudent, error: stuErr } = await adminClient.from("students").insert({
+  const studentPayload: Record<string, any> = {
     organization_id: orgId,
     school_id: schoolId,
     class_id: classId,
@@ -170,7 +289,19 @@ export async function createAdminStudent(formData: FormData) {
     card_code: cardCode,
     parent_invite_code: parentInviteCode,
     is_active: true
-  }).select("id").single();
+  };
+  if (imgRes.url) {
+    studentPayload.avatar_url = imgRes.url;
+  }
+
+  let { data: newStudent, error: stuErr } = await adminClient.from("students").insert(studentPayload).select("id").single();
+
+  if (stuErr && stuErr.message.includes("avatar_url")) {
+    delete studentPayload.avatar_url;
+    const retry = await adminClient.from("students").insert(studentPayload).select("id").single();
+    newStudent = retry.data;
+    stuErr = retry.error;
+  }
 
   if (stuErr || !newStudent) {
     return { error: stuErr?.message || "Failed to create student record." };
@@ -182,6 +313,22 @@ export async function createAdminStudent(formData: FormData) {
     student_id: newStudent.id,
     token_hash: tokenHash,
     is_active: true
+  });
+
+  // Record audit log
+  await adminClient.from("audit_logs").insert({
+    organization_id: orgId,
+    actor_user_id: access.profile.id,
+    action: "student.created",
+    entity_type: "student",
+    entity_id: newStudent.id,
+    metadata: {
+      first_name: firstName,
+      last_initial: lastInitial,
+      class_id: classId,
+      grade_level: gradeLevel,
+      has_avatar: Boolean(imgRes.url)
+    }
   });
 
   refresh("/admin/users", "/admin/schools", "/teacher/students", "/admin");
@@ -217,14 +364,27 @@ export async function createSchool(formData: FormData) {
   const contactEmail = String(formData.get("contactEmail") ?? "").trim();
   const contactPhone = String(formData.get("contactPhone") ?? "").trim();
   const agreementStatus = String(formData.get("agreementStatus") ?? "verified").trim();
+  const logoFile = formData.get("logoFile") as File | null;
+  const logoUrl = String(formData.get("logoUrl") ?? "").trim();
 
   if (!name) return { error: "School name is required." };
+
+  // Upload logo if provided
+  const imgRes = await processImageUpload({
+    file: logoFile,
+    url: logoUrl,
+    folder: "schools",
+    fileNamePrefix: "sch"
+  });
+  if (imgRes.error) {
+    return { error: imgRes.error };
+  }
 
   const adminClient = createAdminClient();
   const { data: orgs } = await adminClient.from("organizations").select("id").limit(1);
   const orgId = orgs?.[0]?.id || "00000000-0000-0000-0000-000000000001";
 
-  const { error } = await adminClient.from("schools").insert({
+  const schoolPayload: Record<string, any> = {
     organization_id: orgId,
     name,
     district_name: districtName || null,
@@ -238,9 +398,34 @@ export async function createSchool(formData: FormData) {
     contact_phone: contactPhone || null,
     agreement_status: agreementStatus,
     is_active: true
-  });
+  };
+  if (imgRes.url) {
+    schoolPayload.logo_url = imgRes.url;
+  }
+
+  let { data: newSchool, error } = await adminClient.from("schools").insert(schoolPayload).select("id").single();
+  if (error && error.message.includes("logo_url")) {
+    delete schoolPayload.logo_url;
+    const retry = await adminClient.from("schools").insert(schoolPayload).select("id").single();
+    newSchool = retry.data;
+    error = retry.error;
+  }
 
   if (error) return { error: error.message };
+
+  // Record audit log
+  await adminClient.from("audit_logs").insert({
+    organization_id: orgId,
+    actor_user_id: access.profile.id,
+    action: "school.created",
+    entity_type: "school",
+    entity_id: newSchool?.id || null,
+    metadata: {
+      name,
+      district: districtName,
+      has_logo: Boolean(imgRes.url)
+    }
+  });
 
   refresh("/admin/schools", "/admin");
   return { success: true };
@@ -284,14 +469,27 @@ export async function createStore(formData: FormData) {
   const address = String(formData.get("address") ?? "").trim();
   const businessHours = String(formData.get("businessHours") ?? "").trim();
   const representativeName = String(formData.get("representativeName") ?? "").trim();
+  const logoFile = formData.get("logoFile") as File | null;
+  const logoUrl = String(formData.get("logoUrl") ?? "").trim();
 
   if (!name) return { error: "Store name is required." };
+
+  // Upload logo if provided
+  const imgRes = await processImageUpload({
+    file: logoFile,
+    url: logoUrl,
+    folder: "stores",
+    fileNamePrefix: "sto"
+  });
+  if (imgRes.error) {
+    return { error: imgRes.error };
+  }
 
   const adminClient = createAdminClient();
   const { data: orgs } = await adminClient.from("organizations").select("id").limit(1);
   const orgId = orgs?.[0]?.id || "00000000-0000-0000-0000-000000000001";
 
-  const { data: newStore, error: storeErr } = await adminClient.from("stores").insert({
+  const storePayload: Record<string, any> = {
     organization_id: orgId,
     name,
     contact_email: contactEmail,
@@ -299,7 +497,20 @@ export async function createStore(formData: FormData) {
     business_hours: businessHours,
     representative_name: representativeName,
     is_active: true
-  }).select("id").single();
+  };
+  if (imgRes.url) {
+    storePayload.logo_url = imgRes.url;
+  }
+
+  let { data: newStore, error: storeErr } = await adminClient.from("stores").insert(storePayload).select("id").single();
+  if (storeErr && storeErr.message.includes("logo_url")) {
+    delete storePayload.logo_url;
+    const retry = await adminClient.from("stores").insert(storePayload).select("id").single();
+    newStore = retry.data;
+    storeErr = retry.error;
+  }
+
+  if (storeErr) return { error: storeErr.message };
 
   if (newStore) {
     // Generate check-in code
@@ -308,6 +519,20 @@ export async function createStore(formData: FormData) {
       store_id: newStore.id,
       token_hash: tokenHash,
       is_active: true
+    });
+
+    // Record audit log
+    await adminClient.from("audit_logs").insert({
+      organization_id: orgId,
+      actor_user_id: access.profile.id,
+      action: "store.created",
+      entity_type: "store",
+      entity_id: newStore.id,
+      metadata: {
+        name,
+        contact_email: contactEmail,
+        has_logo: Boolean(imgRes.url)
+      }
     });
   }
 
@@ -354,11 +579,24 @@ export async function updateSchool(formData: FormData) {
   const contactPhone = String(formData.get("contactPhone") ?? "").trim();
   const agreementStatus = String(formData.get("agreementStatus") ?? "verified").trim();
   const isActive = formData.get("isActive") === "true" || formData.get("isActive") === "on";
+  const logoFile = formData.get("logoFile") as File | null;
+  const logoUrl = String(formData.get("logoUrl") ?? "").trim();
 
   if (!schoolId || !name) return { error: "School ID and name are required." };
 
+  // Upload logo if provided
+  const imgRes = await processImageUpload({
+    file: logoFile,
+    url: logoUrl,
+    folder: "schools",
+    fileNamePrefix: "sch"
+  });
+  if (imgRes.error) {
+    return { error: imgRes.error };
+  }
+
   const adminClient = createAdminClient();
-  const { error } = await adminClient.from("schools").update({
+  const updatePayload: Record<string, any> = {
     name,
     district_name: districtName || null,
     nces_id: ncesId || null,
@@ -371,9 +609,33 @@ export async function updateSchool(formData: FormData) {
     contact_phone: contactPhone || null,
     agreement_status: agreementStatus,
     is_active: isActive
-  }).eq("id", schoolId);
+  };
+  if (imgRes.url !== undefined) {
+    updatePayload.logo_url = imgRes.url;
+  }
+
+  let { error } = await adminClient.from("schools").update(updatePayload).eq("id", schoolId);
+  if (error && error.message.includes("logo_url")) {
+    delete updatePayload.logo_url;
+    const retry = await adminClient.from("schools").update(updatePayload).eq("id", schoolId);
+    error = retry.error;
+  }
 
   if (error) return { error: error.message };
+
+  // Record audit log
+  await adminClient.from("audit_logs").insert({
+    actor_user_id: access.profile.id,
+    action: "school.updated",
+    entity_type: "school",
+    entity_id: schoolId,
+    metadata: {
+      name,
+      district: districtName,
+      logo_updated: imgRes.url !== undefined
+    }
+  });
+
   refresh("/admin/schools", "/admin");
   return { success: true };
 }
@@ -444,20 +706,58 @@ export async function updateStore(formData: FormData) {
   const businessHours = String(formData.get("businessHours") ?? "").trim();
   const representativeName = String(formData.get("representativeName") ?? "").trim();
   const isActive = formData.get("isActive") === "true" || formData.get("isActive") === "on";
+  const logoFile = formData.get("logoFile") as File | null;
+  const logoUrl = String(formData.get("logoUrl") ?? "").trim();
 
   if (!storeId || !name) return { error: "Store ID and name are required." };
 
+  // Upload logo if provided
+  const imgRes = await processImageUpload({
+    file: logoFile,
+    url: logoUrl,
+    folder: "stores",
+    fileNamePrefix: "sto"
+  });
+  if (imgRes.error) {
+    return { error: imgRes.error };
+  }
+
   const adminClient = createAdminClient();
-  const { error } = await adminClient.from("stores").update({
+  const updatePayload: Record<string, any> = {
     name,
     contact_email: contactEmail,
     address,
     business_hours: businessHours,
     representative_name: representativeName,
-    is_active: isActive
-  }).eq("id", storeId);
+    is_active: isActive,
+    updated_at: new Date().toISOString()
+  };
+  if (imgRes.url !== undefined) {
+    updatePayload.logo_url = imgRes.url;
+  }
+
+  let { error } = await adminClient.from("stores").update(updatePayload).eq("id", storeId);
+  if (error && error.message.includes("logo_url")) {
+    delete updatePayload.logo_url;
+    const retry = await adminClient.from("stores").update(updatePayload).eq("id", storeId);
+    error = retry.error;
+  }
 
   if (error) return { error: error.message };
+
+  // Record audit log
+  await adminClient.from("audit_logs").insert({
+    actor_user_id: access.profile.id,
+    action: "store.updated",
+    entity_type: "store",
+    entity_id: storeId,
+    metadata: {
+      name,
+      contact_email: contactEmail,
+      logo_updated: imgRes.url !== undefined
+    }
+  });
+
   refresh("/admin/stores", "/admin");
   return { success: true };
 }
@@ -484,20 +784,60 @@ export async function updateAdminStudent(formData: FormData) {
   const lastInitial = String(formData.get("lastInitial") ?? "").trim().toUpperCase() || null;
   const gradeLevel = Number(formData.get("gradeLevel") ?? 0);
   const classId = String(formData.get("classId") ?? "").trim();
+  const avatarFile = formData.get("avatarFile") as File | null;
+  const avatarUrl = String(formData.get("avatarUrl") ?? "").trim();
 
   if (!studentId || !firstName || !classId) {
     return { error: "Student ID, first name, and class are required." };
   }
 
+  // Upload avatar if provided
+  const imgRes = await processImageUpload({
+    file: avatarFile,
+    url: avatarUrl,
+    folder: "students",
+    fileNamePrefix: "stu"
+  });
+  if (imgRes.error) {
+    return { error: imgRes.error };
+  }
+
   const adminClient = createAdminClient();
-  const { error } = await adminClient.from("students").update({
+  const updatePayload: Record<string, any> = {
     first_name: firstName,
     last_initial: lastInitial,
     grade_level: gradeLevel,
-    class_id: classId
-  }).eq("id", studentId);
+    class_id: classId,
+    updated_at: new Date().toISOString()
+  };
+  if (imgRes.url !== undefined) {
+    updatePayload.avatar_url = imgRes.url;
+  }
+
+  let { error } = await adminClient.from("students").update(updatePayload).eq("id", studentId);
+  if (error && error.message.includes("avatar_url")) {
+    delete updatePayload.avatar_url;
+    const retry = await adminClient.from("students").update(updatePayload).eq("id", studentId);
+    error = retry.error;
+  }
 
   if (error) return { error: error.message };
+
+  // Record audit log
+  await adminClient.from("audit_logs").insert({
+    actor_user_id: access.profile.id,
+    action: "student.updated",
+    entity_type: "student",
+    entity_id: studentId,
+    metadata: {
+      first_name: firstName,
+      last_initial: lastInitial,
+      grade_level: gradeLevel,
+      class_id: classId,
+      avatar_updated: imgRes.url !== undefined
+    }
+  });
+
   refresh("/admin/users", "/teacher/students", "/admin");
   return { success: true };
 }

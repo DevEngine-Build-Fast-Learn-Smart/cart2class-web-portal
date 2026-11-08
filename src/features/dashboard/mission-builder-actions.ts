@@ -19,6 +19,14 @@ export async function saveStage1Question(formData: FormData) {
   const correct = String(formData.get("correct") ?? "").trim();
   const optionsRaw = String(formData.get("options") ?? "").trim();
   const questionId = String(formData.get("questionId") ?? "").trim();
+  const optionImagesRaw = String(formData.get("optionImagesJson") ?? "").trim();
+
+  let optionImages: Record<string, string> = {};
+  if (optionImagesRaw) {
+    try {
+      optionImages = JSON.parse(optionImagesRaw);
+    } catch (_) {}
+  }
 
   if (!prompt || !correct) return { error: "Prompt and correct answer are required." };
 
@@ -32,7 +40,7 @@ export async function saveStage1Question(formData: FormData) {
       prompt_text: prompt,
       spoken_prompt: spoken,
       hint_text: hint,
-      answer_config: { correct, options },
+      answer_config: { correct, options, optionImages },
       skill_tags: ["phonemic_awareness"]
     }).eq("id", questionId);
   } else {
@@ -44,7 +52,7 @@ export async function saveStage1Question(formData: FormData) {
       prompt_text: prompt,
       spoken_prompt: spoken,
       hint_text: hint,
-      answer_config: { correct, options },
+      answer_config: { correct, options, optionImages },
       skill_tags: ["phonemic_awareness"]
     });
   }
@@ -76,7 +84,7 @@ export async function saveStage2Product(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const barcode = String(formData.get("barcode") ?? "").trim();
-  const imageAsset = String(formData.get("imageAsset") ?? "assets/images/corn.svg").trim();
+  let imageAsset = String(formData.get("imageAsset") ?? "assets/images/corn.svg").trim();
   const priceDollars = Number(formData.get("price") ?? 1.0);
   const priceCents = Math.round(priceDollars * 100);
   const weightGrams = Number(formData.get("weightGrams") ?? 500);
@@ -86,6 +94,24 @@ export async function saveStage2Product(formData: FormData) {
   if (!name || !barcode) return { error: "Product name and barcode are required." };
 
   const adminClient = createAdminClient();
+
+  // Handle uploaded product file if provided
+  const productFile = formData.get("productFile") as File | null;
+  if (productFile && productFile.size > 0) {
+    try {
+      const buffer = Buffer.from(await productFile.arrayBuffer());
+      const fileName = `${Date.now()}_${productFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const storagePath = `products/${missionId || "general"}/${fileName}`;
+      const { error: uploadErr } = await adminClient.storage
+        .from("mission-assets")
+        .upload(storagePath, buffer, { contentType: productFile.type, upsert: true });
+
+      if (!uploadErr) {
+        const { data: pubUrl } = adminClient.storage.from("mission-assets").getPublicUrl(storagePath);
+        if (pubUrl?.publicUrl) imageAsset = pubUrl.publicUrl;
+      }
+    } catch (_) {}
+  }
 
   if (productId) {
     await adminClient.from("mission_products").update({
@@ -187,6 +213,14 @@ export async function saveStage4Math(formData: FormData) {
   const hint = String(formData.get("hint") ?? "").trim();
   const optionsRaw = String(formData.get("options") ?? "").trim();
   const questionId = String(formData.get("questionId") ?? "").trim();
+  const optionImagesRaw = String(formData.get("optionImagesJson") ?? "").trim();
+
+  let optionImages: Record<string, string> = {};
+  if (optionImagesRaw) {
+    try {
+      optionImages = JSON.parse(optionImagesRaw);
+    } catch (_) {}
+  }
 
   if (!prompt || !correct) return { error: "Prompt and correct answer are required." };
 
@@ -201,7 +235,7 @@ export async function saveStage4Math(formData: FormData) {
       spoken_prompt: spoken,
       question_kind: kind,
       hint_text: hint,
-      answer_config: { correct, options },
+      answer_config: { correct, options, optionImages },
       skill_tags: ["math", kind]
     }).eq("id", questionId);
   } else {
@@ -214,7 +248,7 @@ export async function saveStage4Math(formData: FormData) {
       prompt_text: prompt,
       spoken_prompt: spoken,
       hint_text: hint,
-      answer_config: { correct, options },
+      answer_config: { correct, options, optionImages },
       skill_tags: ["math", kind]
     });
   }
@@ -321,4 +355,46 @@ export async function uploadMissionAsset(formData: FormData) {
   refresh("/teacher/missions", `/teacher/missions/${missionId}`);
   return { success: true, url: cdnUrl, sha256 };
 }
+
+export async function uploadOptionImage(formData: FormData) {
+  const access = await requireRole("teacher");
+  if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
+
+  const file = formData.get("file") as File | null;
+  const missionId = String(formData.get("missionId") ?? "general");
+
+  if (!file || file.size === 0) return { error: "No file provided" };
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
+  const fileName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+  const storagePath = `options/${missionId}/${fileName}`;
+
+  const adminClient = createAdminClient();
+  const { error: uploadErr } = await adminClient.storage
+    .from("mission-assets")
+    .upload(storagePath, buffer, {
+      contentType: file.type,
+      upsert: true
+    });
+
+  if (uploadErr) return { error: uploadErr.message };
+
+  const { data: pubUrl } = adminClient.storage.from("mission-assets").getPublicUrl(storagePath);
+  const cdnUrl = pubUrl.publicUrl;
+
+  await adminClient.from("mission_assets").insert({
+    mission_id: missionId === "general" ? null : missionId,
+    stage_key: "options",
+    asset_path: cdnUrl,
+    cdn_url: cdnUrl,
+    sha256_hash: sha256,
+    size_bytes: file.size,
+    content_type: file.type,
+    file_name: file.name
+  });
+
+  return { success: true, url: cdnUrl };
+}
+
 

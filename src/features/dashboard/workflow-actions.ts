@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/permissions/access";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { processImageUpload } from "@/lib/storage/upload";
 
 const refresh = (...paths: string[]) => paths.forEach((path) => revalidatePath(path));
 
@@ -43,8 +45,38 @@ export async function transitionReward(formData: FormData) {
 
 export async function updateStoreProfile(formData: FormData) {
   const access = await requireRole("store"); if (access.unavailable || !access.supabase) return;
-  await access.supabase.rpc("update_own_store_profile", { p_store_id: String(formData.get("storeId") ?? ""), p_contact_email: String(formData.get("contactEmail") ?? ""), p_address: String(formData.get("address") ?? ""), p_business_hours: String(formData.get("businessHours") ?? ""), p_representative_name: String(formData.get("representativeName") ?? "") });
-  refresh("/store/profile");
+  const storeId = String(formData.get("storeId") ?? "");
+  const logoFile = formData.get("logoFile") as File | null;
+  const logoUrl = String(formData.get("logoUrl") ?? "").trim();
+
+  const imgRes = await processImageUpload({
+    file: logoFile,
+    url: logoUrl,
+    folder: "stores",
+    fileNamePrefix: "sto"
+  });
+
+  await access.supabase.rpc("update_own_store_profile", {
+    p_store_id: storeId,
+    p_contact_email: String(formData.get("contactEmail") ?? ""),
+    p_address: String(formData.get("address") ?? ""),
+    p_business_hours: String(formData.get("businessHours") ?? ""),
+    p_representative_name: String(formData.get("representativeName") ?? "")
+  });
+
+  if (storeId && imgRes.url !== undefined) {
+    const adminClient = createAdminClient();
+    try {
+      await adminClient.from("stores").update({
+        logo_url: imgRes.url,
+        updated_at: new Date().toISOString()
+      }).eq("id", storeId);
+    } catch (err) {
+      console.error("Failed to update store logo:", err);
+    }
+  }
+
+  refresh("/store/profile", "/store");
 }
 
 export async function saveRewardPreparation(formData: FormData) {
@@ -73,8 +105,57 @@ export async function archiveStoreProduct(formData: FormData) {
 }
 
 export async function saveTeacherStudent(formData: FormData) {
-  const access = await requireRole("teacher"); if (access.unavailable || !access.supabase) return;
-  await access.supabase.rpc("save_teacher_student", { p_student_id: String(formData.get("studentId") ?? "").trim() || null, p_class_id: String(formData.get("classId") ?? ""), p_first_name: String(formData.get("firstName") ?? ""), p_last_initial: String(formData.get("lastInitial") ?? ""), p_grade_level: Number(formData.get("gradeLevel")) });
+  const access = await requireRole("teacher");
+  if (access.unavailable || !access.supabase) return;
+
+  const studentIdInput = String(formData.get("studentId") ?? "").trim() || null;
+  const classId = String(formData.get("classId") ?? "");
+  const firstName = String(formData.get("firstName") ?? "").trim();
+  const lastInitial = String(formData.get("lastInitial") ?? "").trim();
+  const gradeLevel = Number(formData.get("gradeLevel"));
+  const avatarFile = formData.get("avatarFile") as File | null;
+  const avatarUrl = String(formData.get("avatarUrl") ?? "").trim();
+
+  // Upload avatar if provided
+  const imgRes = await processImageUpload({
+    file: avatarFile,
+    url: avatarUrl,
+    folder: "students",
+    fileNamePrefix: "stu"
+  });
+  if (imgRes.error) {
+    console.error("Student avatar upload error:", imgRes.error);
+    return;
+  }
+
+  const { data: savedStudentId, error: rpcErr } = await access.supabase.rpc("save_teacher_student", {
+    p_student_id: studentIdInput,
+    p_class_id: classId,
+    p_first_name: firstName,
+    p_last_initial: lastInitial,
+    p_grade_level: gradeLevel
+  });
+
+  if (rpcErr) {
+    console.error("Failed to save teacher student:", rpcErr);
+    return;
+  }
+
+  const effectiveId = savedStudentId || studentIdInput;
+
+  // Update avatar in student record if an avatar was uploaded or linked
+  if (effectiveId && imgRes.url !== undefined) {
+    const adminClient = createAdminClient();
+    try {
+      await adminClient.from("students").update({
+        avatar_url: imgRes.url,
+        updated_at: new Date().toISOString()
+      }).eq("id", effectiveId);
+    } catch (err) {
+      console.error("Failed to update student avatar:", err);
+    }
+  }
+
   refresh("/teacher/students", "/teacher/classes", "/teacher");
 }
 

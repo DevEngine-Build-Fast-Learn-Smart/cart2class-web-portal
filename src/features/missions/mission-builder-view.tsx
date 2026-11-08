@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   Volume2,
   ShoppingBag,
@@ -14,10 +15,12 @@ import {
   ArrowLeft,
   X,
   FileAudio,
-  FileImage
+  FileImage,
+  ImageIcon
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { OptionPictureManager } from "./option-picture-manager";
 import {
   saveStage1Question,
   deleteStage1Question,
@@ -63,18 +66,25 @@ export function MissionBuilderView({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b pb-5">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-extrabold text-navy">{mission.title}</h1>
-            <Badge tone={mission.status === "published" ? "green" : mission.sharing_status === "submitted" ? "amber" : "blue"}>
-              {mission.status === "published" ? "Published" : mission.sharing_status}
-            </Badge>
+      <div>
+        <Link
+          href="/teacher/library"
+          className="inline-flex items-center gap-1.5 text-xs font-bold text-muted hover:text-navy transition mb-3"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" /> Back to Shared Mission Library
+        </Link>
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b pb-5">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-extrabold text-navy">{mission.title}</h1>
+              <Badge tone={mission.status === "published" ? "green" : mission.sharing_status === "submitted" ? "amber" : "blue"}>
+                {mission.status === "published" ? "Published" : mission.sharing_status}
+              </Badge>
+            </div>
+            <p className="mt-1 text-sm text-muted">
+              Mission #{mission.mission_number || 4} · Grades {mission.grade_min}–{mission.grade_max} · {mission.estimated_minutes || 12} mins · {mission.stars || 5} Stars
+            </p>
           </div>
-          <p className="mt-1 text-sm text-muted">
-            Mission #{mission.mission_number || 4} · Grades {mission.grade_min}–{mission.grade_max} · {mission.estimated_minutes || 12} mins · {mission.stars || 5} Stars
-          </p>
-        </div>
 
         <div className="flex flex-wrap gap-2">
           <Button
@@ -99,6 +109,7 @@ export function MissionBuilderView({
           )}
         </div>
       </div>
+    </div>
 
       {/* Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-line pb-1">
@@ -176,23 +187,6 @@ export function MissionBuilderView({
                   className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
                 />
               </label>
-              <label className="text-sm font-bold">
-                Correct Answer
-                <input
-                  required
-                  name="correct"
-                  defaultValue={selectedQuestion?.answer_config?.correct || "banana"}
-                  className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
-                />
-              </label>
-              <label className="text-sm font-bold">
-                Answer Options (comma-separated)
-                <input
-                  name="options"
-                  defaultValue={selectedQuestion?.answer_config?.options?.join(", ") || "banana, apple, carrot, milk"}
-                  className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
-                />
-              </label>
               <label className="text-sm font-bold md:col-span-2">
                 Hint
                 <input
@@ -201,6 +195,16 @@ export function MissionBuilderView({
                   className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
                 />
               </label>
+
+              {/* Dynamic Option Pictures */}
+              <OptionPictureManager
+                key={`s1-${selectedQuestion?.id || "new"}`}
+                initialOptions={selectedQuestion?.answer_config?.options || ["banana", "apple", "carrot", "milk"]}
+                initialOptionImages={selectedQuestion?.answer_config?.optionImages || {}}
+                initialCorrect={selectedQuestion?.answer_config?.correct || "banana"}
+                mediaAssets={assets}
+                missionId={mission.id}
+              />
             </div>
             <div className="flex gap-2">
               <Button type="submit" className="bg-navy text-white font-bold">
@@ -301,14 +305,29 @@ export function MissionBuilderView({
                   className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
                 />
               </label>
-              <label className="text-sm font-bold">
-                Image Asset Path
-                <input
-                  name="imageAsset"
-                  defaultValue={selectedProduct?.image_asset || "assets/images/corn.svg"}
-                  className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
-                />
-              </label>
+              <div className="text-sm font-bold md:col-span-3 panel bg-white p-3 rounded-xl border">
+                <span className="block text-xs font-bold uppercase text-muted mb-2">Product Picture (Upload File or Enter URL)</span>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="text-xs font-normal">
+                    <span className="font-bold text-ink block mb-1">Upload Local Image</span>
+                    <input
+                      type="file"
+                      name="productFile"
+                      accept="image/*"
+                      className="block w-full text-xs font-normal file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-brand hover:file:bg-blue-100"
+                    />
+                  </label>
+                  <label className="text-xs font-normal">
+                    <span className="font-bold text-ink block mb-1">Or Image Link / Asset Path</span>
+                    <input
+                      name="imageAsset"
+                      placeholder="e.g. assets/images/corn.svg or https://..."
+                      defaultValue={selectedProduct?.image_asset || "assets/images/corn.svg"}
+                      className="block h-9 w-full rounded-lg border bg-slate-50 px-3 text-xs font-normal"
+                    />
+                  </label>
+                </div>
+              </div>
               <label className="text-sm font-bold md:col-span-3">
                 Instructions for Student
                 <input
@@ -467,23 +486,6 @@ export function MissionBuilderView({
                   <option value="totalCost">totalCost (Addition)</option>
                 </select>
               </label>
-              <label className="text-sm font-bold">
-                Correct Answer
-                <input
-                  required
-                  name="correct"
-                  defaultValue={selectedQuestion?.answer_config?.correct || "apples"}
-                  className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
-                />
-              </label>
-              <label className="text-sm font-bold">
-                Answer Options (comma-separated)
-                <input
-                  name="options"
-                  defaultValue={selectedQuestion?.answer_config?.options?.join(", ") || "apples, corn"}
-                  className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
-                />
-              </label>
               <label className="text-sm font-bold md:col-span-2">
                 Hint
                 <input
@@ -492,6 +494,16 @@ export function MissionBuilderView({
                   className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
                 />
               </label>
+
+              {/* Dynamic Math Option Pictures */}
+              <OptionPictureManager
+                key={`s4-${selectedQuestion?.id || "new"}`}
+                initialOptions={selectedQuestion?.answer_config?.options || ["apples", "corn"]}
+                initialOptionImages={selectedQuestion?.answer_config?.optionImages || {}}
+                initialCorrect={selectedQuestion?.answer_config?.correct || "apples"}
+                mediaAssets={assets}
+                missionId={mission.id}
+              />
             </div>
             <div className="flex gap-2">
               <Button type="submit" className="bg-navy text-white font-bold">
@@ -640,15 +652,25 @@ export function MissionBuilderView({
                   <Volume2 className="h-5 w-5" /> &ldquo;{stage1Questions[0]?.spoken_prompt || "Which word begins with the sound buh?"}&rdquo;
                 </div>
                 <div className="grid grid-cols-2 gap-3 pt-2">
-                  {(stage1Questions[0]?.answer_config?.options || ["banana", "apple", "carrot", "milk"]).map((opt: string) => (
-                    <button
-                      key={opt}
-                      onClick={() => alert(opt === (stage1Questions[0]?.answer_config?.correct || "banana") ? "Correct! ⭐" : "Try again!")}
-                      className="rounded-xl border-2 border-line hover:border-brand p-4 text-center font-extrabold text-ink hover:bg-blue-50/50 transition"
-                    >
-                      {opt}
-                    </button>
-                  ))}
+                  {(stage1Questions[0]?.answer_config?.options || ["banana", "apple", "carrot", "milk"]).map((opt: string) => {
+                    const imgUrl = stage1Questions[0]?.answer_config?.optionImages?.[opt];
+                    return (
+                      <button
+                        key={opt}
+                        onClick={() => alert(opt === (stage1Questions[0]?.answer_config?.correct || "banana") ? "Correct! ⭐" : "Try again!")}
+                        className="rounded-xl border-2 border-line hover:border-brand p-3 text-center font-extrabold text-ink hover:bg-blue-50/50 transition flex flex-col items-center justify-center gap-2"
+                      >
+                        {imgUrl ? (
+                          <img src={imgUrl} alt={opt} className="h-12 w-12 object-contain" />
+                        ) : (
+                          <div className="h-12 w-12 rounded-lg bg-slate-100 grid place-items-center text-slate-400">
+                            <ShoppingBag className="h-5 w-5" />
+                          </div>
+                        )}
+                        <span className="text-sm font-bold">{opt}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               <div className="flex justify-between">
@@ -716,15 +738,25 @@ export function MissionBuilderView({
               <div className="rounded-xl bg-white p-6 shadow-sm border space-y-4 text-center">
                 <h3 className="text-xl font-black text-navy">{stage4Questions[0]?.prompt_text || "Which one costs more?"}</h3>
                 <div className="grid grid-cols-2 gap-3 pt-2">
-                  {(stage4Questions[0]?.answer_config?.options || ["apples", "corn"]).map((opt: string) => (
-                    <button
-                      key={opt}
-                      onClick={() => alert(opt === (stage4Questions[0]?.answer_config?.correct || "apples") ? "Correct math answer! ⭐" : "Try again!")}
-                      className="rounded-xl border-2 border-line hover:border-brand p-4 text-center font-extrabold text-ink hover:bg-blue-50/50 transition"
-                    >
-                      {opt}
-                    </button>
-                  ))}
+                  {(stage4Questions[0]?.answer_config?.options || ["apples", "corn"]).map((opt: string) => {
+                    const imgUrl = stage4Questions[0]?.answer_config?.optionImages?.[opt];
+                    return (
+                      <button
+                        key={opt}
+                        onClick={() => alert(opt === (stage4Questions[0]?.answer_config?.correct || "apples") ? "Correct math answer! ⭐" : "Try again!")}
+                        className="rounded-xl border-2 border-line hover:border-brand p-3 text-center font-extrabold text-ink hover:bg-blue-50/50 transition flex flex-col items-center justify-center gap-2"
+                      >
+                        {imgUrl ? (
+                          <img src={imgUrl} alt={opt} className="h-12 w-12 object-contain" />
+                        ) : (
+                          <div className="h-12 w-12 rounded-lg bg-slate-100 grid place-items-center text-slate-400">
+                            <Calculator className="h-5 w-5" />
+                          </div>
+                        )}
+                        <span className="text-sm font-bold">{opt}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               <div className="flex justify-between">

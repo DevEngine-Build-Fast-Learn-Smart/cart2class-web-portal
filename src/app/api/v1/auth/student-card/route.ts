@@ -33,6 +33,29 @@ export async function POST(request: Request) {
       schools?: { name?: string } | { name?: string }[] | null;
     } | null;
     const school = Array.isArray(classInfo?.schools) ? classInfo?.schools[0] : classInfo?.schools;
+
+    // Log student login to audit_logs for administrator compliance & visibility
+    try {
+      await supabase.from("audit_logs").insert({
+        organization_id: "00000000-0000-0000-0000-000000000001",
+        actor_user_id: null,
+        action: "student.login",
+        entity_type: "student",
+        entity_id: student.id,
+        metadata: {
+          student_name: `${student.first_name} ${student.last_initial ?? ""}`.trim(),
+          grade_level: student.grade_level,
+          class_name: classInfo?.name ?? null,
+          school_name: school?.name ?? null,
+          device_token_prefix: deviceSession.session_token.slice(0, 8),
+          method: "student_qr_card",
+          login_time: new Date().toISOString()
+        },
+      });
+    } catch (auditErr) {
+      console.error("Failed to insert student login audit log", auditErr);
+    }
+
     return NextResponse.json({
       sessionToken: deviceSession.session_token,
       expiresAt: deviceSession.expires_at,

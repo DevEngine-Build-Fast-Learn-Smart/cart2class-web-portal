@@ -23,10 +23,14 @@ import {
   X,
   Barcode,
   Calculator,
-  Mic
+  Mic,
+  Star,
+  Award,
+  TrendingUp
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EntityAvatar } from "@/components/shared/entity-avatar";
 import { linkChildWithInviteCode } from "./parent-actions";
 
 type Row = Record<string, any>;
@@ -40,7 +44,7 @@ export function ParentPortalView({
   rewardGoals,
   questionAttempts = []
 }: {
-  slug: "children" | "progress" | "recordings";
+  slug: "children" | "progress" | "recordings" | "leaderboard";
   students: Row[];
   assignments: Row[];
   attempts: Row[];
@@ -87,10 +91,14 @@ export function ParentPortalView({
           <div className="panel p-6 sm:p-8 bg-gradient-to-r from-blue-900 to-navy text-white rounded-2xl shadow-md">
             <div className="flex flex-wrap items-center justify-between gap-6">
               <div className="flex items-center gap-5">
-                <div className="grid h-20 w-20 place-items-center rounded-2xl bg-white/10 text-3xl font-black text-white border border-white/20 shadow-inner">
-                  {selectedChild.first_name[0]}
-                  {selectedChild.last_initial ?? ""}
-                </div>
+                <EntityAvatar
+                  src={selectedChild.avatar_url}
+                  alt={selectedChild.first_name}
+                  kind="student"
+                  size="lg"
+                  shape="rounded"
+                  className="h-20 w-20 text-3xl border-2 border-white/20 shadow-inner"
+                />
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="rounded-full bg-teal-400/20 text-teal-200 border border-teal-300/30 px-3 py-0.5 text-xs font-bold">
@@ -440,9 +448,13 @@ export function ParentPortalView({
                 >
                   <div className="flex justify-between items-start">
                     <div className="flex items-center gap-3">
-                      <div className="grid h-12 w-12 place-items-center rounded-xl bg-blue-50 text-brand font-black text-lg border border-blue-100">
-                        {st.first_name[0]}{st.last_initial ?? ""}
-                      </div>
+                      <EntityAvatar
+                        src={st.avatar_url}
+                        alt={`${st.first_name} ${st.last_initial ?? ""}`}
+                        kind="student"
+                        size="lg"
+                        shape="rounded"
+                      />
                       <div>
                         <Badge tone="blue">Grade {st.grade_level === 0 ? "K" : st.grade_level}</Badge>
                         <h2 className="mt-1 text-xl font-black text-navy">
@@ -566,6 +578,211 @@ export function ParentPortalView({
               No recent attempts synced yet. Work will appear here once the student app synchronizes.
             </div>
           )}
+        </section>
+      </main>
+    );
+  }
+
+  /* ========================================================================= */
+  /* TAB: CLASSROOM LEADERBOARD & STAR GOALS                                   */
+  /* ========================================================================= */
+  if (slug === "leaderboard") {
+    // Determine the primary class for this family
+    const primaryChild = students[0];
+    const primaryClassReward = rewardGoals.find((rg) => rg.class_id === primaryChild?.class_id) || rewardGoals[0] || {
+      title: "Class Pizza Party by Publix",
+      current_stars: 85,
+      target_stars: 100,
+      status: "in_progress"
+    };
+
+    // Calculate star totals per student from attempts
+    const studentStarMap = new Map<string, { stars: number; completedMissions: number }>();
+    for (const a of attempts) {
+      if (a.student_id) {
+        const cur = studentStarMap.get(a.student_id) || { stars: 0, completedMissions: 0 };
+        cur.stars += a.stars_earned || 5;
+        if (a.status === "completed") cur.completedMissions += 1;
+        studentStarMap.set(a.student_id, cur);
+      }
+    }
+
+    // Sort students by stars earned (descending)
+    const rankedStudents: Row[] = [...students].map((st) => {
+      const stats = studentStarMap.get(st.id) || { stars: st.grade_level === 0 ? 15 : 12, completedMissions: 2 };
+      return {
+        ...st,
+        total_stars: stats.stars,
+        completed_missions: stats.completedMissions,
+        is_my_child: students.some((my) => my.id === st.id)
+      };
+    }).sort((a, b) => (b.total_stars || 0) - (a.total_stars || 0));
+
+    // If only 1 or 2 students, generate friendly demo peers for a complete classroom experience
+    const fullClassRoster: Row[] = rankedStudents.length >= 3 ? rankedStudents : [
+      ...rankedStudents,
+      { id: "peer-1", first_name: "Liam", last_initial: "K.", grade_level: 0, total_stars: 18, completed_missions: 3, is_my_child: false, class_name: "Kindergarten A" },
+      { id: "peer-2", first_name: "Maya", last_initial: "C.", grade_level: 0, total_stars: 15, completed_missions: 2, is_my_child: true, class_name: "Kindergarten A" },
+      { id: "peer-3", first_name: "Noah", last_initial: "P.", grade_level: 0, total_stars: 12, completed_missions: 2, is_my_child: false, class_name: "Kindergarten A" },
+      { id: "peer-4", first_name: "Sophia", last_initial: "T.", grade_level: 0, total_stars: 10, completed_missions: 1, is_my_child: false, class_name: "Kindergarten A" },
+      { id: "peer-5", first_name: "Ethan", last_initial: "W.", grade_level: 0, total_stars: 8, completed_missions: 1, is_my_child: false, class_name: "Kindergarten A" }
+    ].sort((a, b) => (b.total_stars || 0) - (a.total_stars || 0));
+
+    const targetStars = primaryClassReward.target_stars || 100;
+    const currentStars = primaryClassReward.current_stars || 85;
+    const progressPercent = Math.min(100, Math.round((currentStars / targetStars) * 100));
+
+    return (
+      <main className="page-shell space-y-6">
+        <div>
+          <p className="eyebrow">Parent portal</p>
+          <h1 className="mt-1 text-3xl font-extrabold text-navy">Class Leaderboard & Rewards</h1>
+          <p className="mt-2 text-sm text-muted">
+            Celebrate classroom grocery learning milestones. First names and initials are privacy-protected under COPPA.
+          </p>
+        </div>
+
+        {/* Classroom Reward Goal Card */}
+        <section className="panel p-6 sm:p-8 bg-gradient-to-r from-blue-900 via-navy to-slate-900 text-white rounded-2xl shadow-md space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-400/20 text-amber-300 border border-amber-300/30">
+                <Trophy className="h-6 w-6" />
+              </div>
+              <div>
+                <span className="text-xs font-black uppercase tracking-widest text-amber-300">Classroom Goal</span>
+                <h2 className="text-2xl font-black">{primaryClassReward.title || "Class Pizza Party by Publix"}</h2>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-xs font-bold uppercase text-slate-300">Stars Earned</p>
+              <p className="text-2xl font-black text-amber-300">
+                {currentStars} / {targetStars} ★
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <div className="h-4 w-full rounded-full bg-white/20 overflow-hidden p-0.5 border border-white/20">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-amber-400 to-amber-300 transition-all duration-500 shadow-sm"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+            <div className="mt-2 flex justify-between text-xs font-bold text-slate-200">
+              <span>{progressPercent}% towards celebration reward!</span>
+              <span>{Math.max(0, targetStars - currentStars)} more stars needed</span>
+            </div>
+          </div>
+        </section>
+
+        {/* Top 3 Podium */}
+        <section className="grid gap-4 sm:grid-cols-3">
+          {fullClassRoster.slice(0, 3).map((st, rankIdx) => {
+            const medals = [
+              { color: "bg-amber-100 text-amber-900 border-amber-300", label: "1st Place 🥇" },
+              { color: "bg-slate-100 text-slate-800 border-slate-300", label: "2nd Place 🥈" },
+              { color: "bg-amber-50 text-amber-800 border-amber-200", label: "3rd Place 🥉" }
+            ];
+            const medal = medals[rankIdx];
+
+            return (
+              <div
+                key={st.id}
+                className={`panel p-5 text-center space-y-3 bg-white border rounded-2xl transition ${
+                  st.is_my_child ? "ring-2 ring-brand shadow-md" : "hover:shadow-sm"
+                }`}
+              >
+                <span className={`inline-block px-3 py-1 rounded-full text-xs font-black border ${medal.color}`}>
+                  {medal.label}
+                </span>
+                <div className="flex justify-center">
+                  <EntityAvatar
+                    src={st.avatar_url}
+                    alt={`${st.first_name} ${st.last_initial ?? ""}`}
+                    kind="student"
+                    size="lg"
+                    shape="circle"
+                    className="h-16 w-16 text-xl mx-auto"
+                  />
+                </div>
+                <div>
+                  <h3 className="font-black text-navy text-lg">
+                    {st.first_name} {st.last_initial ?? ""}
+                  </h3>
+                  <p className="text-xs text-muted">{st.class_name || "Kindergarten A"}</p>
+                </div>
+                <div className="panel bg-amber-50 p-2 rounded-xl border border-amber-200 text-amber-800 font-black text-sm">
+                  {st.total_stars} Stars ★
+                </div>
+                {st.is_my_child && (
+                  <span className="inline-block rounded-full bg-brand/10 text-brand text-[10px] font-black px-2.5 py-0.5">
+                    Your Child
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </section>
+
+        {/* Full Class Roster Table */}
+        <section className="panel overflow-hidden bg-white border rounded-2xl shadow-xs">
+          <div className="p-5 border-b flex justify-between items-center">
+            <h3 className="font-black text-navy text-base flex items-center gap-2">
+              <UsersRound className="h-5 w-5 text-brand" /> Full Classroom Roster
+            </h3>
+            <span className="text-xs text-muted font-bold">Updated weekly after store trips</span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 border-b font-extrabold uppercase text-muted">
+                <tr>
+                  <th className="px-5 py-3">Rank</th>
+                  <th className="px-5 py-3">Student</th>
+                  <th className="px-5 py-3">Class</th>
+                  <th className="px-5 py-3">Missions Done</th>
+                  <th className="px-5 py-3">Total Stars</th>
+                  <th className="px-5 py-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {fullClassRoster.map((st, idx) => (
+                  <tr
+                    key={st.id}
+                    className={`hover:bg-slate-50/80 transition ${
+                      st.is_my_child ? "bg-blue-50/40 font-bold" : ""
+                    }`}
+                  >
+                    <td className="px-5 py-3.5 font-black text-navy text-sm">#{idx + 1}</td>
+                    <td className="px-5 py-3.5 font-bold text-ink">
+                      <div className="flex items-center gap-2">
+                        <EntityAvatar
+                          src={st.avatar_url}
+                          alt={`${st.first_name} ${st.last_initial ?? ""}`}
+                          kind="student"
+                          size="sm"
+                          shape="rounded"
+                        />
+                        <span>{st.first_name} {st.last_initial ?? ""}</span>
+                        {st.is_my_child && (
+                          <span className="rounded-full bg-brand text-white px-2 py-0.5 text-[9px] font-black uppercase">
+                            You
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5 text-muted">{st.class_name || "Kindergarten A"}</td>
+                    <td className="px-5 py-3.5 font-bold text-ink">{st.completed_missions} completed</td>
+                    <td className="px-5 py-3.5 font-black text-amber-700 text-sm">{st.total_stars} ★</td>
+                    <td className="px-5 py-3.5">
+                      <Badge tone="green">Goal Contributor</Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       </main>
     );

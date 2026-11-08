@@ -61,6 +61,39 @@ export async function POST(request: Request) {
         await supabase.from("reward_goals").update({ current_stars: Math.min(reward.current_stars + mission.stars, reward.target_stars) }).eq("id", reward.id);
       }
     }
+
+    // Log student activity / mission completion to audit_logs
+    try {
+      const { data: stInfo } = await supabase
+        .from("students")
+        .select("first_name,last_initial,classes(name)")
+        .eq("id", session.student_id)
+        .maybeSingle();
+      const clsName = (stInfo?.classes as any)?.name ?? "Classroom";
+      const studentLabel = stInfo ? `${stInfo.first_name} ${stInfo.last_initial ?? ""}`.trim() : "Learner";
+
+      await supabase.from("audit_logs").insert({
+        organization_id: "00000000-0000-0000-0000-000000000001",
+        actor_user_id: null,
+        action: complete ? "student.mission_completed" : `student.${event.kind}_activity`,
+        entity_type: "student",
+        entity_id: session.student_id,
+        metadata: {
+          student_name: studentLabel,
+          class_name: clsName,
+          mission_id: assignment.mission_id,
+          stage: Number.isInteger(progress.stage) ? progress.stage + 1 : 1,
+          stars_earned: complete ? mission.stars : 0,
+          kind: event.kind,
+          products_scanned_count: Array.isArray(progress.productIds) ? progress.productIds.length : 0,
+          checked_in: progress.checkedIn === true,
+          activity_time: new Date().toISOString()
+        },
+      });
+    } catch (auditErr) {
+      console.error("Failed to insert student activity audit log", auditErr);
+    }
+
     return NextResponse.json({ eventId: event.id, serverAcknowledged: true, duplicate: false });
   } catch (error) {
     if (error instanceof StudentSessionError || error instanceof StudentMissionError) return NextResponse.json({ error: error.message }, { status: error.status });

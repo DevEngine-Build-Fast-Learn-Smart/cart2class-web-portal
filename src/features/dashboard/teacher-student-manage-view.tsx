@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { BulkQrSheetButton, QrExportButton } from "@/components/shared/code-export";
+import { ImageUploadField } from "@/components/shared/image-upload-field";
+import { EntityAvatar } from "@/components/shared/entity-avatar";
 import { deactivateTeacherStudent, saveTeacherStudent } from "./workflow-actions";
 
 type Student = {
@@ -12,6 +14,7 @@ type Student = {
   class_id: string | null;
   parent_invite_code?: string | null;
   card_code?: string | null;
+  avatar_url?: string | null;
   is_active: boolean;
 };
 
@@ -48,6 +51,16 @@ function StudentForm({ classes, student }: { classes: Classroom[]; student?: Stu
           <option value="2">Grade 2</option>
         </select>
       </label>
+      <div className="sm:col-span-2">
+        <ImageUploadField
+          label="Student Photo (Optional)"
+          fileInputName="avatarFile"
+          urlInputName="avatarUrl"
+          initialUrl={student?.avatar_url || null}
+          shape="circle"
+          helpText="Optional · Max 5MB"
+        />
+      </div>
       <button className="w-fit rounded-lg bg-navy px-3 py-2 text-sm font-bold text-white">
         {student ? "Save student" : "Add student"}
       </button>
@@ -59,7 +72,7 @@ export async function TeacherStudentManageView({ supabase }: { supabase: Supabas
   const [{ data: students }, { data: classes }] = await Promise.all([
     supabase
       .from("students")
-      .select("id,first_name,last_initial,grade_level,class_id,parent_invite_code,card_code,is_active")
+      .select("id,first_name,last_initial,grade_level,class_id,parent_invite_code,card_code,avatar_url,is_active")
       .order("first_name"),
     supabase.from("classes").select("id,name,grade_level").order("grade_level")
   ]);
@@ -91,11 +104,20 @@ export async function TeacherStudentManageView({ supabase }: { supabase: Supabas
                 {roster.map((student) => (
                   <article className="panel p-5 space-y-3" key={student.id}>
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h2 className="font-extrabold text-lg text-ink">{label(student)}</h2>
-                        <p className="text-xs text-muted">
-                          {names.get(student.class_id ?? "") ?? "Unassigned"} · Grade {student.grade_level}
-                        </p>
+                      <div className="flex items-center gap-3">
+                        <EntityAvatar
+                          src={student.avatar_url}
+                          alt={label(student)}
+                          kind="student"
+                          size="md"
+                          shape="circle"
+                        />
+                        <div>
+                          <h2 className="font-extrabold text-lg text-ink">{label(student)}</h2>
+                          <p className="text-xs text-muted">
+                            {names.get(student.class_id ?? "") ?? "Unassigned"} · Grade {student.grade_level}
+                          </p>
+                        </div>
                       </div>
                       <Badge tone={student.is_active ? "green" : "slate"}>
                         {student.is_active ? "Active" : "Inactive"}
