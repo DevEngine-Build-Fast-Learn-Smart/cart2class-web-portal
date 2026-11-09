@@ -83,3 +83,87 @@ export async function missionPayload(supabase: SupabaseClient, assignment: Assig
     assets: (assets ?? []).map((asset) => ({ path: asset.asset_path, url: asset.cdn_url, sha256: asset.sha256_hash, sizeBytes: Number(asset.size_bytes), contentType: asset.content_type })),
   };
 }
+
+export async function assignedMissionsList(supabase: SupabaseClient, studentId: string) {
+  const { data: student } = await supabase.from("students").select("class_id").eq("id", studentId).eq("is_active", true).maybeSingle();
+  if (!student?.class_id) return [];
+
+  const { data: assignments } = await supabase
+    .from("mission_assignments")
+    .select("id, mission_id, mission_version_id, available_at, due_at, status")
+    .eq("class_id", student.class_id)
+    .order("created_at", { ascending: false });
+
+  if (!assignments || assignments.length === 0) return [];
+
+  const { data: studentAssignments } = await supabase
+    .from("mission_student_assignments")
+    .select("mission_id, student_id");
+
+  const allowedAssignments = (assignments as Assignment[]).filter((candidate) => {
+    const restrictions = (studentAssignments ?? []).filter((sa) => sa.mission_id === candidate.mission_id);
+    if (restrictions.length === 0) return true;
+    return restrictions.some((sa) => sa.student_id === studentId);
+  });
+
+  if (allowedAssignments.length === 0) return [];
+
+  const missionIds = allowedAssignments.map((a) => a.mission_id);
+  const { data: missions } = await supabase
+    .from("missions")
+    .select("id, title, description, mission_number, stars, estimated_minutes, opens_at, expires_at, store_id, stores(name)")
+    .in("id", missionIds)
+    .eq("status", "published")
+    .in("sharing_status", ["approved", "featured"]);
+
+  const missionMap = new Map((missions ?? []).map((m: any) => [m.id, m]));
+  const now = new Date();
+
+  return allowedAssignments.map((assignment) => {
+    const mission = missionMap.get(assignment.mission_id);
+    if (!mission) return null;
+    const store = Array.isArray(mission.stores) ? mission.stores[0] : mission.stores;
+    const opensAt = assignment.available_at ?? mission.opens_at;
+    const expiresAt = assignment.due_at ?? mission.expires_at;
+    const isAvail = assignment.status === "available" && (!opensAt || new Date(opensAt) <= now) && (!expiresAt || new Date(expiresAt) >= now);
+    const isSched = (assignment.status === "available" || assignment.status === "scheduled") && (!!opensAt && new Date(opensAt) > now);
+
+    return {
+      id: mission.id,
+      number: mission.mission_number,
+      title: mission.title,
+      description: mission.description,
+      minutes: mission.estimated_minutes,
+      stars: mission.stars,
+      opensAt,
+      expiresAt,
+      isAvailable: isAvail,
+      isScheduled: isSched,
+      storeName: store?.name ?? "",
+    };
+  }).filter(Boolean);
+}
+
+export async function studentPastMissions(supabase: SupabaseClient, studentId: string) {
+  const { data: runs } = await supabase
+    .from("mission_runs")
+    .select("id, mission_id, stars_earned, completed_at, complete, stage, missions(id, mission_number, title, description, stars)")
+    .eq("student_id", studentId)
+    .order("completed_at", { ascending: false });
+
+  const pastList: any[] = [];
+  for (const run of runs ?? []) {
+    const m = Array.isArray(run.missions) ? run.missions[0] : (run.missions as any);
+    if (m && (run.complete || (run.stars_earned && run.stars_earned > 0) || run.stage >= 4)) {
+      pastList.push({
+        id: run.mission_id,
+        number: m.mission_number,
+        title: m.title,
+        starsEarned: run.stars_earned || m.stars || 5,
+        completedAt: run.completed_at || (run as any).updated_at || new Date().toISOString(),
+        description: m.description,
+      });
+    }
+  }
+  return pastList;
+}

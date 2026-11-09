@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireStudentSession, StudentSessionError } from "@/lib/student-session";
+import { studentPastMissions } from "@/lib/student-mission";
 
 export async function GET(request: Request) {
   try {
@@ -22,6 +23,7 @@ export async function GET(request: Request) {
     if (!classroom) return NextResponse.json({ error: "This student’s class is no longer active." }, { status: 403 });
     const teacherProfile = Array.isArray(teacher?.[0]?.profiles) ? teacher?.[0]?.profiles[0] : teacher?.[0]?.profiles;
     const reward = rewards?.[0];
+    const pastMissions = await studentPastMissions(supabase, student.id);
     return NextResponse.json({
       student: {
         id: student.id,
@@ -43,6 +45,7 @@ export async function GET(request: Request) {
           const mission = Array.isArray(run.mission) ? run.mission[0] : run.mission;
           return typeof mission?.mission_number === "number" ? [mission.mission_number] : [];
         }),
+        participatedMissions: pastMissions,
       },
     });
   } catch (error) {

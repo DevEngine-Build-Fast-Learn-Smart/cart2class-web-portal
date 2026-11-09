@@ -1,15 +1,22 @@
 import { NextResponse } from "next/server";
 
-import { assignedMission, missionPayload, StudentMissionError } from "@/lib/student-mission";
+import { assignedMission, missionPayload, assignedMissionsList, studentPastMissions, StudentMissionError } from "@/lib/student-mission";
 import { requireStudentSession, StudentSessionError } from "@/lib/student-session";
 
 export async function GET(request: Request) {
   try {
     const { supabase, session } = await requireStudentSession(request);
     const { assignment } = await assignedMission(supabase, session.student_id);
+    const [missionData, allAssigned, pastMissions] = await Promise.all([
+      missionPayload(supabase, assignment),
+      assignedMissionsList(supabase, session.student_id),
+      studentPastMissions(supabase, session.student_id),
+    ]);
     return NextResponse.json({
       status: "assigned",
-      mission: await missionPayload(supabase, assignment),
+      mission: missionData,
+      assignedMissions: allAssigned,
+      previousMissions: pastMissions,
     });
   } catch (error) {
     if (error instanceof StudentSessionError || error instanceof StudentMissionError) {

@@ -781,4 +781,54 @@ export async function resetClassroomLeaderboard(classId: string) {
   return { success: true };
 }
 
+export async function updateMissionSchedule(formData: FormData) {
+  const access = await requireAnyRole(["teacher", "admin"]);
+  if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
+
+  const missionId = String(formData.get("missionId") ?? "").trim();
+  if (!missionId) return { error: "Mission ID is required." };
+
+  const scheduleType = String(formData.get("scheduleType") ?? "immediate");
+  const rawOpensAt = String(formData.get("opensAt") ?? "").trim();
+  const rawExpiresAt = String(formData.get("expiresAt") ?? "").trim();
+  const estimatedMinutes = Number(formData.get("estimatedMinutes") ?? 12);
+
+  const opensAt = scheduleType === "immediate" ? null : (rawOpensAt ? new Date(rawOpensAt).toISOString() : null);
+  const expiresAt = rawExpiresAt ? new Date(rawExpiresAt).toISOString() : null;
+
+  const adminClient = createAdminClient();
+
+  // 1. Update missions table
+  const { error: missionErr } = await adminClient
+    .from("missions")
+    .update({
+      opens_at: opensAt,
+      expires_at: expiresAt,
+      estimated_minutes: estimatedMinutes,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", missionId);
+
+  if (missionErr) {
+    return { error: `Failed to update mission schedule: ${missionErr.message}` };
+  }
+
+  // 2. Update all active mission assignments for this mission
+  const { error: asgErr } = await adminClient
+    .from("mission_assignments")
+    .update({
+      available_at: opensAt,
+      due_at: expiresAt,
+      status: "available",
+    })
+    .eq("mission_id", missionId);
+
+  if (asgErr) {
+    console.error("Assignment schedule update error:", asgErr);
+  }
+
+  refresh("/teacher/missions", "/admin/missions", "/teacher/library", "/admin/library");
+  return { success: true, opensAt, expiresAt, estimatedMinutes };
+}
+
 

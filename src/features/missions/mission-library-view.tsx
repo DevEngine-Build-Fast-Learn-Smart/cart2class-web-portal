@@ -29,7 +29,8 @@ import {
   MessageSquare,
   Send,
   Loader2,
-  CheckCheck
+  CheckCheck,
+  Calendar
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,7 @@ import { toggleMissionStatus, cloneMission } from "./mission-library-actions";
 import { submitMission } from "@/features/dashboard/workflow-actions";
 import { CreateMissionModal } from "./create-mission-modal";
 import { ManageStudentAccessModal } from "./manage-student-access-modal";
+import { EditMissionScheduleModal } from "./edit-mission-schedule-modal";
 
 type Row = Record<string, any>;
 
@@ -68,6 +70,7 @@ export function MissionLibraryView({
   const [sharingFilter, setSharingFilter] = useState("all");
   const [selectedMissionForResults, setSelectedMissionForResults] = useState<Row | null>(null);
   const [selectedMissionForAccess, setSelectedMissionForAccess] = useState<Row | null>(null);
+  const [selectedMissionForSchedule, setSelectedMissionForSchedule] = useState<Row | null>(null);
   const [isToggling, setIsToggling] = useState<string | null>(null);
   const [isCloning, setIsCloning] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<string | null>(null);
@@ -469,21 +472,37 @@ export function MissionLibraryView({
                     </Link>
                   </div>
 
-                  {/* Manage Student Access Button */}
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => setSelectedMissionForAccess(m)}
-                    className="w-full text-xs font-bold h-9 bg-purple-50/90 hover:bg-purple-100 text-purple-900 border border-purple-200 shadow-2xs"
-                  >
-                    <Users className="mr-1.5 h-3.5 w-3.5 text-purple-700" />
-                    <span>
-                      Manage Student Access
-                      {(studentAssignments ?? []).filter((sa) => sa.mission_id === m.id).length > 0
-                        ? ` (${(studentAssignments ?? []).filter((sa) => sa.mission_id === m.id).length} Selected)`
-                        : " (All Students)"}
-                    </span>
-                  </Button>
+                  {/* Student Access & Reschedule Buttons */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setSelectedMissionForAccess(m)}
+                      className="w-full text-xs font-bold h-9 bg-purple-50/90 hover:bg-purple-100 text-purple-900 border border-purple-200 shadow-2xs"
+                    >
+                      <Users className="mr-1.5 h-3.5 w-3.5 text-purple-700" />
+                      <span className="truncate">
+                        Student Access
+                        {(studentAssignments ?? []).filter((sa) => sa.mission_id === m.id).length > 0
+                          ? ` (${(studentAssignments ?? []).filter((sa) => sa.mission_id === m.id).length})`
+                          : ""}
+                      </span>
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setSelectedMissionForSchedule(m)}
+                      className="w-full text-xs font-bold h-9 bg-cyan-50/90 hover:bg-cyan-100 text-cyan-950 border border-cyan-200 shadow-2xs"
+                    >
+                      <Calendar className="mr-1.5 h-3.5 w-3.5 text-cyan-700" />
+                      <span className="truncate">
+                        {m.opens_at && new Date(m.opens_at) > new Date()
+                          ? `Starts ${new Date(m.opens_at).toLocaleDateString([], { month: "short", day: "numeric" })}`
+                          : "Reschedule / Time"}
+                      </span>
+                    </Button>
+                  </div>
 
                   <div className="grid grid-cols-2 gap-2 pt-1">
                     {/* Role-Specific Primary Workflow Action */}
@@ -701,6 +720,12 @@ export function MissionLibraryView({
           showToast(`Student access saved for "${selectedMissionForAccess?.title}"!`);
           router.refresh();
         }}
+      />
+
+      <EditMissionScheduleModal
+        isOpen={!!selectedMissionForSchedule}
+        onClose={() => setSelectedMissionForSchedule(null)}
+        mission={selectedMissionForSchedule || {}}
       />
     </main>
   );

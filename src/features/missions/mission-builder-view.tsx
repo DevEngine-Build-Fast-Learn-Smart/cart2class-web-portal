@@ -45,7 +45,8 @@ import {
   MessageSquare,
   CheckCheck,
   Layers,
-  Users
+  Users,
+  Calendar
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,7 @@ import { BarcodeExportButton } from "@/components/shared/code-export";
 import { OptionPictureManager } from "./option-picture-manager";
 import { CreateMissionModal } from "./create-mission-modal";
 import { ManageStudentAccessModal } from "./manage-student-access-modal";
+import { EditMissionScheduleModal } from "./edit-mission-schedule-modal";
 import {
   saveStage1Question,
   deleteStage1Question,
@@ -97,6 +99,7 @@ export function MissionBuilderView({
 }) {
   const router = useRouter();
   const [isAccessModalOpen, setIsAccessModalOpen] = useState(false);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"stage1" | "stage2" | "stage3" | "stage4" | "media" | "preview">("stage1");
   const [previewStage, setPreviewStage] = useState<number>(0);
   const [selectedProduct, setSelectedProduct] = useState<Row | null>(null);
@@ -445,6 +448,20 @@ export function MissionBuilderView({
                 {(studentAssignments ?? []).filter((sa) => sa.mission_id === mission.id).length > 0
                   ? ` (${(studentAssignments ?? []).filter((sa) => sa.mission_id === mission.id).length} Students)`
                   : " (All Students)"}
+              </span>
+            </Button>
+
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setIsScheduleModalOpen(true)}
+              className="font-bold border-cyan-300 bg-cyan-50/90 hover:bg-cyan-100 text-cyan-950 h-10 px-3.5 text-xs shadow-2xs"
+            >
+              <Calendar className="mr-1.5 h-4 w-4 text-cyan-700" />
+              <span>
+                {mission.opens_at && new Date(mission.opens_at) > new Date()
+                  ? `Scheduled (${new Date(mission.opens_at).toLocaleDateString([], { month: "short", day: "numeric" })})`
+                  : "Reschedule / Time"}
               </span>
             </Button>
 
@@ -2937,6 +2954,12 @@ export function MissionBuilderView({
         onSaved={() => {
           router.refresh();
         }}
+      />
+
+      <EditMissionScheduleModal
+        mission={mission}
+        isOpen={isScheduleModalOpen}
+        onClose={() => setIsScheduleModalOpen(false)}
       />
     </div>
   );
