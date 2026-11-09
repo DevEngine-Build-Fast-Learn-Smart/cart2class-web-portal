@@ -279,15 +279,17 @@ export default async function PortalPage({
         { data: students },
         { data: classes },
         { data: stores },
-        { data: reviews }
+        { data: reviews },
+        { data: studentAssignments }
       ] = await Promise.all([
         supabase.from("missions").select("*").order("updated_at", { ascending: false }),
         supabase.from("mission_attempts").select("*").order("started_at", { ascending: false }),
         supabase.from("mission_assignments").select("*"),
-        supabase.from("students").select("id,first_name,last_initial,grade_level,class_id"),
+        supabase.from("students").select("id,first_name,last_initial,grade_level,class_id,avatar_url"),
         supabase.from("classes").select("id,name,grade_level"),
         supabase.from("stores").select("id,name"),
-        supabase.from("mission_reviews").select("*").order("created_at", { ascending: false })
+        supabase.from("mission_reviews").select("*").order("created_at", { ascending: false }),
+        supabase.from("mission_student_assignments").select("*")
       ]);
 
       content = (
@@ -296,6 +298,7 @@ export default async function PortalPage({
           attempts={attempts ?? []}
           assignments={assignments ?? []}
           students={students ?? []}
+          studentAssignments={studentAssignments ?? []}
           classes={classes ?? []}
           stores={stores ?? []}
           reviews={reviews ?? []}
@@ -320,7 +323,7 @@ export default async function PortalPage({
           estimated_minutes: 12,
           stars: 5,
           status: "draft",
-          sharing_status: "community"
+          sharing_status: "private"
         };
       } else {
         const { data: missions } = await supabase
@@ -349,7 +352,9 @@ export default async function PortalPage({
         { data: assets },
         { data: stores },
         { data: classes },
-        { data: reviews }
+        { data: reviews },
+        { data: students },
+        { data: studentAssignments }
       ] = await Promise.all([
         supabase.from("missions").select("id,title,mission_number,status,sharing_status").order("updated_at", { ascending: false }),
         supabase.from("mission_versions").select("id").eq("mission_id", mission.id).limit(1),
@@ -357,7 +362,9 @@ export default async function PortalPage({
         supabase.from("mission_assets").select("*").or(`mission_id.eq.${mission.id},mission_id.is.null`),
         supabase.from("stores").select("id,name").order("name"),
         supabase.from("classes").select("id,name,grade_level").order("name"),
-        supabase.from("mission_reviews").select("*").eq("mission_id", mission.id).order("created_at", { ascending: false })
+        supabase.from("mission_reviews").select("*").eq("mission_id", mission.id).order("created_at", { ascending: false }),
+        supabase.from("students").select("id,first_name,last_initial,grade_level,class_id,avatar_url"),
+        supabase.from("mission_student_assignments").select("*").eq("mission_id", mission.id)
       ]);
 
       const versionId = versions?.[0]?.id;
@@ -399,6 +406,8 @@ export default async function PortalPage({
             stores={stores ?? []}
             allMissions={allMissions ?? []}
             classes={classes ?? []}
+            students={students ?? []}
+            studentAssignments={studentAssignments ?? []}
             reviews={reviews ?? []}
             role="admin"
           />
@@ -495,15 +504,17 @@ export default async function PortalPage({
         { data: students },
         { data: classes },
         { data: stores },
-        { data: reviews }
+        { data: reviews },
+        { data: studentAssignments }
       ] = await Promise.all([
         supabase.from("missions").select("*").order("updated_at", { ascending: false }),
         supabase.from("mission_attempts").select("*").order("started_at", { ascending: false }),
         supabase.from("mission_assignments").select("*"),
-        supabase.from("students").select("id,first_name,last_initial,grade_level,class_id"),
+        supabase.from("students").select("id,first_name,last_initial,grade_level,class_id,avatar_url"),
         supabase.from("classes").select("id,name,grade_level"),
         supabase.from("stores").select("id,name"),
-        supabase.from("mission_reviews").select("*").order("created_at", { ascending: false })
+        supabase.from("mission_reviews").select("*").order("created_at", { ascending: false }),
+        supabase.from("mission_student_assignments").select("*")
       ]);
 
       content = (
@@ -512,6 +523,7 @@ export default async function PortalPage({
           attempts={attempts ?? []}
           assignments={assignments ?? []}
           students={students ?? []}
+          studentAssignments={studentAssignments ?? []}
           classes={classes ?? []}
           stores={stores ?? []}
           reviews={reviews ?? []}
@@ -537,7 +549,7 @@ export default async function PortalPage({
           estimated_minutes: 12,
           stars: 5,
           status: "draft",
-          sharing_status: "community"
+          sharing_status: "private"
         };
       } else {
         const { data: missions } = await supabase
@@ -566,7 +578,9 @@ export default async function PortalPage({
         { data: assets },
         { data: stores },
         { data: classes },
-        { data: reviews }
+        { data: reviews },
+        { data: students },
+        { data: studentAssignments }
       ] = await Promise.all([
         supabase.from("missions").select("id,title,mission_number,status,sharing_status").order("updated_at", { ascending: false }),
         supabase.from("mission_versions").select("id").eq("mission_id", mission.id).limit(1),
@@ -574,7 +588,9 @@ export default async function PortalPage({
         supabase.from("mission_assets").select("*").or(`mission_id.eq.${mission.id},mission_id.is.null`),
         supabase.from("stores").select("id,name").order("name"),
         supabase.from("classes").select("id,name,grade_level").order("name"),
-        supabase.from("mission_reviews").select("*").eq("mission_id", mission.id).order("created_at", { ascending: false })
+        supabase.from("mission_reviews").select("*").eq("mission_id", mission.id).order("created_at", { ascending: false }),
+        supabase.from("students").select("id,first_name,last_initial,grade_level,class_id,avatar_url"),
+        supabase.from("mission_student_assignments").select("*").eq("mission_id", mission.id)
       ]);
 
       const versionId = versions?.[0]?.id;
@@ -616,6 +632,8 @@ export default async function PortalPage({
             stores={stores ?? []}
             allMissions={allMissions ?? []}
             classes={classes ?? []}
+            students={students ?? []}
+            studentAssignments={studentAssignments ?? []}
             reviews={reviews ?? []}
             role="teacher"
           />

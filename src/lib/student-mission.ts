@@ -16,12 +16,23 @@ export async function assignedMission(supabase: SupabaseClient, studentId: strin
   const { data: assignments, error: assignmentError } = await supabase.from("mission_assignments").select("id,mission_id,mission_version_id,available_at,due_at,status").eq("class_id", student.class_id).order("created_at", { ascending: false });
   if (assignmentError) throw new StudentMissionError("Could not load classroom assignments.", 500);
   
-  // 1. First check for an assignment that is active right now
-  let assignment = (assignments as Assignment[] | null)?.find((candidate) => (!missionId || candidate.mission_id === missionId) && isAvailableNow(candidate));
+  // Check student-specific mission assignments
+  const { data: studentAssignments } = await supabase
+    .from("mission_student_assignments")
+    .select("mission_id, student_id");
+
+  const isAllowedForStudent = (candidate: Assignment) => {
+    const restrictions = (studentAssignments ?? []).filter(sa => sa.mission_id === candidate.mission_id);
+    if (restrictions.length === 0) return true;
+    return restrictions.some(sa => sa.student_id === studentId);
+  };
+
+  // 1. First check for an assignment that is active right now and assigned to student
+  let assignment = (assignments as Assignment[] | null)?.find((candidate) => (!missionId || candidate.mission_id === missionId) && isAvailableNow(candidate) && isAllowedForStudent(candidate));
 
   // 2. If no active assignment is found, check for an upcoming scheduled assignment
   if (!assignment) {
-    assignment = (assignments as Assignment[] | null)?.find((candidate) => (!missionId || candidate.mission_id === missionId) && isUpcoming(candidate));
+    assignment = (assignments as Assignment[] | null)?.find((candidate) => (!missionId || candidate.mission_id === missionId) && isUpcoming(candidate) && isAllowedForStudent(candidate));
   }
 
   if (!assignment) throw new StudentMissionError("This mission is not assigned or available to this student.", 404);
@@ -29,7 +40,7 @@ export async function assignedMission(supabase: SupabaseClient, studentId: strin
 }
 
 export async function missionPayload(supabase: SupabaseClient, assignment: Assignment) {
-  const { data: mission, error: missionError } = await supabase.from("missions").select("id,title,description,estimated_minutes,mission_number,stars,store_id,opens_at,expires_at,passage,passage_detail,status,sharing_status").eq("id", assignment.mission_id).eq("status", "published").in("sharing_status", ["approved", "featured", "community"]).maybeSingle();
+  const { data: mission, error: missionError } = await supabase.from("missions").select("id,title,description,estimated_minutes,mission_number,stars,store_id,opens_at,expires_at,passage,passage_detail,status,sharing_status").eq("id", assignment.mission_id).eq("status", "published").in("sharing_status", ["approved", "featured"]).maybeSingle();
   if (missionError || !mission) throw new StudentMissionError("This mission is no longer published.", 404);
   if (!mission.store_id) throw new StudentMissionError("This mission does not have an approved store location.", 409);
   const [{ data: store }, { data: products }, { data: assets }, { data: stages }] = await Promise.all([

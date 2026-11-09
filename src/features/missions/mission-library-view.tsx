@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   LibraryBig,
   Search,
@@ -12,6 +13,7 @@ import {
   Clock,
   Sparkles,
   UsersRound,
+  Users,
   Trophy,
   Copy,
   Edit3,
@@ -34,6 +36,7 @@ import { Button } from "@/components/ui/button";
 import { toggleMissionStatus, cloneMission } from "./mission-library-actions";
 import { submitMission } from "@/features/dashboard/workflow-actions";
 import { CreateMissionModal } from "./create-mission-modal";
+import { ManageStudentAccessModal } from "./manage-student-access-modal";
 
 type Row = Record<string, any>;
 
@@ -42,6 +45,7 @@ export function MissionLibraryView({
   attempts = [],
   assignments = [],
   students = [],
+  studentAssignments = [],
   classes = [],
   stores = [],
   reviews = [],
@@ -51,16 +55,19 @@ export function MissionLibraryView({
   attempts: Row[];
   assignments: Row[];
   students: Row[];
+  studentAssignments?: Row[];
   classes: Row[];
   stores: Row[];
   reviews?: Row[];
   role: "teacher" | "admin";
 }) {
+  const router = useRouter();
   const [searchTerm, setSearchTerm] = useState("");
   const [gradeFilter, setGradeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [sharingFilter, setSharingFilter] = useState("all");
   const [selectedMissionForResults, setSelectedMissionForResults] = useState<Row | null>(null);
+  const [selectedMissionForAccess, setSelectedMissionForAccess] = useState<Row | null>(null);
   const [isToggling, setIsToggling] = useState<string | null>(null);
   const [isCloning, setIsCloning] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<string | null>(null);
@@ -134,7 +141,7 @@ export function MissionLibraryView({
       (sharingFilter === "approved" && m.sharing_status === "approved") ||
       (sharingFilter === "submitted" && m.sharing_status === "submitted") ||
       (sharingFilter === "rejected" && m.sharing_status === "rejected") ||
-      (sharingFilter === "community" && (m.sharing_status === "community" || m.sharing_status === "draft" || !m.sharing_status));
+      (sharingFilter === "private" && (m.sharing_status === "private" || m.sharing_status === "draft" || !m.sharing_status));
 
     return matchesSearch && matchesGrade && matchesStatus && matchesSharing;
   });
@@ -169,6 +176,7 @@ export function MissionLibraryView({
             role={role}
             stores={stores}
             classes={classes}
+            students={students}
             triggerText="Create New Mission"
             triggerClassName="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-11 px-5 shadow-sm"
           />
@@ -288,7 +296,7 @@ export function MissionLibraryView({
               <option value="submitted">Awaiting Review</option>
               <option value="rejected">Rejected / Changes Needed</option>
               <option value="featured">Featured by A.L.M.A.</option>
-              <option value="community">Drafts / Inactive</option>
+              <option value="private">Private / Classroom Drafts</option>
             </select>
           </div>
         </div>
@@ -414,6 +422,16 @@ export function MissionLibraryView({
                       <BookOpen className="h-3.5 w-3.5 text-slate-500" />
                       {m.passage || "Fluency Passage"}
                     </span>
+                    <span className={`inline-flex items-center gap-1 rounded px-2 py-1 ${
+                      (studentAssignments ?? []).filter((sa) => sa.mission_id === m.id).length > 0
+                        ? "bg-purple-100 text-purple-900 border border-purple-200"
+                        : "bg-slate-100 text-slate-700"
+                    }`}>
+                      <Users className="h-3.5 w-3.5 text-purple-600" />
+                      {(studentAssignments ?? []).filter((sa) => sa.mission_id === m.id).length > 0
+                        ? `${(studentAssignments ?? []).filter((sa) => sa.mission_id === m.id).length} Students Assigned`
+                        : "All Students Access"}
+                    </span>
                   </div>
 
                   {/* Participation Stats Preview */}
@@ -450,6 +468,22 @@ export function MissionLibraryView({
                       </Button>
                     </Link>
                   </div>
+
+                  {/* Manage Student Access Button */}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setSelectedMissionForAccess(m)}
+                    className="w-full text-xs font-bold h-9 bg-purple-50/90 hover:bg-purple-100 text-purple-900 border border-purple-200 shadow-2xs"
+                  >
+                    <Users className="mr-1.5 h-3.5 w-3.5 text-purple-700" />
+                    <span>
+                      Manage Student Access
+                      {(studentAssignments ?? []).filter((sa) => sa.mission_id === m.id).length > 0
+                        ? ` (${(studentAssignments ?? []).filter((sa) => sa.mission_id === m.id).length} Selected)`
+                        : " (All Students)"}
+                    </span>
+                  </Button>
 
                   <div className="grid grid-cols-2 gap-2 pt-1">
                     {/* Role-Specific Primary Workflow Action */}
@@ -649,6 +683,25 @@ export function MissionLibraryView({
           </div>
         );
       })()}
+
+      <ManageStudentAccessModal
+        isOpen={!!selectedMissionForAccess}
+        onClose={() => setSelectedMissionForAccess(null)}
+        mission={selectedMissionForAccess}
+        students={students}
+        classes={classes}
+        currentAssignedStudentIds={
+          selectedMissionForAccess
+            ? (studentAssignments ?? [])
+                .filter((sa) => sa.mission_id === selectedMissionForAccess.id)
+                .map((sa) => sa.student_id)
+            : []
+        }
+        onSaved={() => {
+          showToast(`Student access saved for "${selectedMissionForAccess?.title}"!`);
+          router.refresh();
+        }}
+      />
     </main>
   );
 }

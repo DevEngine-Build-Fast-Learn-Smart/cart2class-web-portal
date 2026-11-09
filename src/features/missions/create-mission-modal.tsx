@@ -30,6 +30,7 @@ export function CreateMissionModal({
   role = "teacher",
   stores = [],
   classes = [],
+  students = [],
   triggerText = "Create New Mission",
   triggerClassName = "bg-navy text-white hover:bg-navy/90 font-bold",
   onCreated
@@ -37,6 +38,7 @@ export function CreateMissionModal({
   role?: "teacher" | "admin";
   stores: StoreItem[];
   classes: ClassItem[];
+  students?: any[];
   triggerText?: string;
   triggerClassName?: string;
   onCreated?: (missionId: string) => void;
@@ -61,6 +63,11 @@ export function CreateMissionModal({
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>(
     classes.map((c) => c.id)
   );
+  const [accessScope, setAccessScope] = useState<"classes" | "students">("classes");
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>(
+    students.map((s) => s.id)
+  );
+  const [studentSearch, setStudentSearch] = useState("");
   const [submitForReview, setSubmitForReview] = useState(role === "teacher");
 
   // Cover Image State
@@ -156,6 +163,12 @@ export function CreateMissionModal({
 
       for (const cId of selectedClassIds) {
         formData.append("classIds", cId);
+      }
+
+      if (accessScope === "students") {
+        for (const sId of selectedStudentIds) {
+          formData.append("studentIds", sId);
+        }
       }
 
       formData.set("submitForReview", String(submitForReview));
@@ -527,45 +540,164 @@ export function CreateMissionModal({
                 </div>
               </div>
 
-              {/* SECTION 6: Classroom Access Checkboxes */}
+              {/* SECTION 6: Student & Classroom Access Checkboxes */}
               <div className="rounded-2xl border border-line bg-slate-50/60 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-black uppercase tracking-wider text-ink flex items-center gap-1.5">
                     <School className="h-3.5 w-3.5 text-brand" /> Which Students / Classrooms Get Access?
                   </label>
-                  <button
-                    type="button"
-                    onClick={toggleSelectAllClasses}
-                    className="text-xs font-bold text-brand hover:underline"
-                  >
-                    {selectedClassIds.length === classes.length ? "Deselect All" : "Select All"}
-                  </button>
-                </div>
-
-                <div className="grid gap-2 sm:grid-cols-2 pt-1 max-h-36 overflow-y-auto">
-                  {classes.map((c) => {
-                    const isChecked = selectedClassIds.includes(c.id);
-                    return (
-                      <label
-                        key={c.id}
-                        onClick={() => toggleClassId(c.id)}
-                        className={`flex items-center gap-2.5 rounded-xl border p-2.5 cursor-pointer text-xs font-bold transition ${
-                          isChecked
-                            ? "bg-blue-50/90 border-brand text-brand shadow-2xs"
-                            : "bg-white border-line text-muted hover:border-slate-300"
+                  <div className="flex items-center rounded-lg border border-line bg-white p-0.5 text-xs font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setAccessScope("classes")}
+                      className={`rounded-md px-2.5 py-1 transition ${
+                        accessScope === "classes"
+                          ? "bg-brand text-white shadow-2xs"
+                          : "text-muted hover:text-ink"
+                      }`}
+                    >
+                      By Classroom
+                    </button>
+                    {students.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setAccessScope("students")}
+                        className={`rounded-md px-2.5 py-1 transition ${
+                          accessScope === "students"
+                            ? "bg-purple-600 text-white shadow-2xs"
+                            : "text-muted hover:text-ink"
                         }`}
                       >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => {}}
-                          className="rounded border-line text-brand focus:ring-brand"
-                        />
-                        <span className="truncate">{c.name}</span>
-                      </label>
-                    );
-                  })}
+                        Select Students ({students.length})
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {accessScope === "classes" ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-muted">
+                        All students enrolled in selected classrooms get access:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={toggleSelectAllClasses}
+                        className="text-xs font-bold text-brand hover:underline"
+                      >
+                        {selectedClassIds.length === classes.length ? "Deselect All" : "Select All"}
+                      </button>
+                    </div>
+
+                    <div className="grid gap-2 sm:grid-cols-2 pt-1 max-h-36 overflow-y-auto">
+                      {classes.map((c) => {
+                        const isChecked = selectedClassIds.includes(c.id);
+                        return (
+                          <label
+                            key={c.id}
+                            onClick={() => toggleClassId(c.id)}
+                            className={`flex items-center gap-2.5 rounded-xl border p-2.5 cursor-pointer text-xs font-bold transition ${
+                              isChecked
+                                ? "bg-blue-50/90 border-brand text-brand shadow-2xs"
+                                : "bg-white border-line text-muted hover:border-slate-300"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {}}
+                              className="rounded border-line text-brand focus:ring-brand"
+                            />
+                            <span className="truncate">{c.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-muted">
+                        Only selected students below can join this mission ({selectedStudentIds.length} of {students.length} selected):
+                      </span>
+                      <div className="flex items-center gap-2 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedStudentIds(students.map((s) => s.id))}
+                          className="font-bold text-brand hover:underline"
+                        >
+                          Select All
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedStudentIds([])}
+                          className="font-bold text-slate-500 hover:underline"
+                        >
+                          Deselect All
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2 sm:grid-cols-2 pt-1 max-h-48 overflow-y-auto pr-1">
+                      {students.map((s) => {
+                        const isChecked = selectedStudentIds.includes(s.id);
+                        const cObj = classes.find((c) => c.id === s.class_id);
+                        const className = cObj?.name || "Class";
+                        const initial = s.first_name ? s.first_name[0].toUpperCase() : "S";
+
+                        return (
+                          <label
+                            key={s.id}
+                            onClick={() => {
+                              setSelectedStudentIds((prev) =>
+                                prev.includes(s.id) ? prev.filter((id) => id !== s.id) : [...prev, s.id]
+                              );
+                              // Keep student class in selectedClassIds
+                              if (s.class_id && !selectedClassIds.includes(s.class_id)) {
+                                setSelectedClassIds((prev) => [...prev, s.class_id]);
+                              }
+                            }}
+                            className={`flex items-center justify-between rounded-xl border p-2 cursor-pointer transition select-none text-xs font-bold ${
+                              isChecked
+                                ? "bg-white border-purple-500 shadow-2xs"
+                                : "bg-slate-100/60 border-line text-muted hover:border-slate-300"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              {s.avatar_url ? (
+                                <img
+                                  src={s.avatar_url}
+                                  alt={s.first_name}
+                                  className="h-7 w-7 rounded-full object-cover shrink-0 border border-slate-200"
+                                />
+                              ) : (
+                                <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-gradient-to-tr from-purple-600 to-indigo-500 text-[10px] font-black text-white">
+                                  {initial}
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <p className="font-black text-navy truncate">
+                                  {s.first_name} {s.last_initial ? `${s.last_initial}.` : ""}
+                                </p>
+                                <p className="text-[10px] font-bold text-muted truncate">
+                                  {className}
+                                </p>
+                              </div>
+                            </div>
+
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {}}
+                              className="rounded border-line text-purple-600 focus:ring-purple-500"
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* SECTION 7: Admin Review Workflow */}

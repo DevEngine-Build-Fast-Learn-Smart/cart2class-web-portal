@@ -43,7 +43,9 @@ import {
   FolderCheck,
   Clock,
   MessageSquare,
-  CheckCheck
+  CheckCheck,
+  Layers,
+  Users
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,6 +53,7 @@ import { AudioPlayer } from "@/components/ui/audio-player";
 import { BarcodeExportButton } from "@/components/shared/code-export";
 import { OptionPictureManager } from "./option-picture-manager";
 import { CreateMissionModal } from "./create-mission-modal";
+import { ManageStudentAccessModal } from "./manage-student-access-modal";
 import {
   saveStage1Question,
   deleteStage1Question,
@@ -74,6 +77,8 @@ export function MissionBuilderView({
   stores,
   allMissions = [],
   classes = [],
+  students = [],
+  studentAssignments = [],
   reviews = [],
   role = "teacher"
 }: {
@@ -85,10 +90,13 @@ export function MissionBuilderView({
   stores: Row[];
   allMissions?: Row[];
   classes?: Row[];
+  students?: Row[];
+  studentAssignments?: Row[];
   reviews?: Row[];
   role?: "teacher" | "admin";
 }) {
   const router = useRouter();
+  const [isAccessModalOpen, setIsAccessModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"stage1" | "stage2" | "stage3" | "stage4" | "media" | "preview">("stage1");
   const [previewStage, setPreviewStage] = useState<number>(0);
   const [selectedProduct, setSelectedProduct] = useState<Row | null>(null);
@@ -363,7 +371,7 @@ export function MissionBuilderView({
           <ArrowLeft className="h-3.5 w-3.5" /> Back to Shared Mission Library
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-4 border-b pb-5">
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-2xl font-extrabold text-navy">{mission.title}</h1>
               <Badge
@@ -385,13 +393,24 @@ export function MissionBuilderView({
                   ? "Awaiting Admin Review"
                   : "Draft Mode"}
               </Badge>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4 pt-1">
+              <p className="text-sm font-bold text-muted">
+                Mission #{mission.mission_number || 4} · Grades {mission.grade_min}–{mission.grade_max} · {mission.estimated_minutes || 12} mins · {mission.stars || 5} Stars
+              </p>
+
               {allMissions.length > 1 && (
-                <div className="flex items-center gap-1.5 ml-2">
-                  <span className="text-xs font-bold text-muted">Switch:</span>
+                <div className="flex items-center gap-2 rounded-2xl border-2 border-brand/20 bg-blue-50/70 p-1 pl-3 shadow-2xs">
+                  <span className="text-xs font-black uppercase tracking-wider text-brand flex items-center gap-1.5">
+                    <Layers className="h-4 w-4 text-brand" />
+                    <span>Switch Mission:</span>
+                  </span>
                   <select
                     value={mission.id}
                     onChange={(e) => router.push(`/${role}/missions?id=${e.target.value}`)}
-                    className="h-8 rounded-lg border border-line bg-slate-50 px-2 text-xs font-bold text-navy focus:border-brand focus:outline-none"
+                    aria-label="Switch active mission"
+                    className="h-9 rounded-xl border border-brand/30 bg-white px-3 text-xs font-black text-navy shadow-2xs hover:border-brand focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20 cursor-pointer min-w-[220px]"
                   >
                     {allMissions.map((m) => (
                       <option key={m.id} value={m.id}>
@@ -402,9 +421,6 @@ export function MissionBuilderView({
                 </div>
               )}
             </div>
-            <p className="text-sm text-muted">
-              Mission #{mission.mission_number || 4} · Grades {mission.grade_min}–{mission.grade_max} · {mission.estimated_minutes || 12} mins · {mission.stars || 5} Stars
-            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -412,6 +428,7 @@ export function MissionBuilderView({
               role={role}
               stores={stores}
               classes={classes}
+              students={students}
               triggerText="Create New Mission"
               triggerClassName="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-10 px-4 text-xs shadow-xs"
             />
@@ -419,8 +436,23 @@ export function MissionBuilderView({
             <Button
               type="button"
               variant="secondary"
+              onClick={() => setIsAccessModalOpen(true)}
+              className="font-bold border-purple-300 bg-purple-50/90 hover:bg-purple-100 text-purple-900 h-10 px-3.5 text-xs shadow-2xs"
+            >
+              <Users className="mr-1.5 h-4 w-4 text-purple-700" />
+              <span>
+                Student Access
+                {(studentAssignments ?? []).filter((sa) => sa.mission_id === mission.id).length > 0
+                  ? ` (${(studentAssignments ?? []).filter((sa) => sa.mission_id === mission.id).length} Students)`
+                  : " (All Students)"}
+              </span>
+            </Button>
+
+            <Button
+              type="button"
+              variant="secondary"
               onClick={startPreview}
-              className="font-bold border-brand text-brand h-10"
+              className="font-bold border-brand text-brand h-10 px-3.5 text-xs shadow-2xs"
             >
               <Eye className="mr-2 h-4 w-4" /> Student Mission Preview
             </Button>
@@ -2890,6 +2922,22 @@ export function MissionBuilderView({
           </div>
         </div>
       )}
+
+      <ManageStudentAccessModal
+        isOpen={isAccessModalOpen}
+        onClose={() => setIsAccessModalOpen(false)}
+        mission={mission}
+        students={students}
+        classes={classes}
+        currentAssignedStudentIds={
+          (studentAssignments ?? [])
+            .filter((sa) => sa.mission_id === mission.id)
+            .map((sa) => sa.student_id)
+        }
+        onSaved={() => {
+          router.refresh();
+        }}
+      />
     </div>
   );
 }

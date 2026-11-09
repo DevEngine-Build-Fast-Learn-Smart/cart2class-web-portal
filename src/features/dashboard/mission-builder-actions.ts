@@ -21,6 +21,7 @@ export async function createNewMission(formData: FormData) {
   const opensAt = String(formData.get("opensAt") ?? "").trim();
   const expiresAt = String(formData.get("expiresAt") ?? "").trim();
   const classIds = formData.getAll("classIds").map(String).filter(Boolean);
+  const studentIds = formData.getAll("studentIds").map(String).filter(Boolean);
   let coverImageUrl = String(formData.get("coverImageUrl") ?? "").trim();
   const coverFile = formData.get("coverFile") as File | null;
 
@@ -92,7 +93,7 @@ export async function createNewMission(formData: FormData) {
   } else {
     // Teacher creating: must be reviewed by admin before publishing
     initialStatus = "draft";
-    initialSharingStatus = submitImmediately ? "submitted" : "draft";
+    initialSharingStatus = submitImmediately ? "submitted" : "private";
   }
 
   // 1. Insert into missions table
@@ -256,9 +257,19 @@ export async function createNewMission(formData: FormData) {
     });
   }
 
-  // 7. Assign mission to selected classrooms
-  if (classIds.length > 0) {
-    const assignmentRows = classIds.map((cId) => ({
+  // 7. Assign mission to selected classrooms and individual students
+  let finalClassIds = [...classIds];
+  if (studentIds.length > 0) {
+    const { data: assignedStudents } = await adminClient.from("students").select("class_id").in("id", studentIds);
+    for (const st of assignedStudents ?? []) {
+      if (st.class_id && !finalClassIds.includes(st.class_id)) {
+        finalClassIds.push(st.class_id);
+      }
+    }
+  }
+
+  if (finalClassIds.length > 0) {
+    const assignmentRows = finalClassIds.map((cId) => ({
       mission_id: newMission.id,
       mission_version_id: newVersion.id,
       class_id: cId,
@@ -269,6 +280,15 @@ export async function createNewMission(formData: FormData) {
     }));
 
     await adminClient.from("mission_assignments").insert(assignmentRows);
+  }
+
+  if (studentIds.length > 0) {
+    const studentRows = studentIds.map((sId) => ({
+      mission_id: newMission.id,
+      student_id: sId,
+      assigned_by: access.profile.id
+    }));
+    await adminClient.from("mission_student_assignments").insert(studentRows);
   }
 
   refresh("/teacher/missions", "/admin/missions", "/teacher/library", "/admin/library", "/teacher/classes", `/teacher/missions?id=${newMission.id}`);

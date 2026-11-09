@@ -92,7 +92,7 @@ export async function cloneMission(formData: FormData) {
       estimated_minutes: sourceMission.estimated_minutes,
       stars: sourceMission.stars,
       status: "draft",
-      sharing_status: "community",
+      sharing_status: "private",
       passage: sourceMission.passage,
       passage_detail: sourceMission.passage_detail,
       store_id: sourceMission.store_id
@@ -205,7 +205,7 @@ export async function updateMissionSharing(formData: FormData) {
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
 
   const missionId = String(formData.get("missionId") ?? "").trim();
-  const sharingStatus = String(formData.get("sharingStatus") ?? "community").trim();
+  const sharingStatus = String(formData.get("sharingStatus") ?? "private").trim();
 
   const adminClient = createAdminClient();
   const { error } = await adminClient
@@ -221,5 +221,74 @@ export async function updateMissionSharing(formData: FormData) {
   revalidatePath("/teacher/library");
   revalidatePath("/teacher/missions");
   return { success: true };
+}
+
+export async function updateMissionStudentAccess(formData: FormData) {
+  const access = await requireAnyRole(["teacher", "admin"]);
+  if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
+
+  const missionId = String(formData.get("missionId") ?? "").trim();
+  const allStudents = formData.get("allStudents") === "true";
+  const studentIds = formData.getAll("studentIds").map(String).filter(Boolean);
+
+  if (!missionId) return { error: "Mission ID is required." };
+
+  const adminClient = createAdminClient();
+
+  // 1. Clear existing student assignments for this mission
+  await adminClient.from("mission_student_assignments").delete().eq("mission_id", missionId);
+
+  // 2. If specific students selected (not allStudents), insert records
+  if (!allStudents && studentIds.length > 0) {
+    const rows = studentIds.map((sId) => ({
+      mission_id: missionId,
+      student_id: sId,
+      assigned_by: access.profile.id
+    }));
+    const { error: insertErr } = await adminClient.from("mission_student_assignments").insert(rows);
+    if (insertErr) return { error: insertErr.message };
+
+    // Also ensure classrooms of those students have a mission_assignment row
+    const { data: students } = await adminClient.from("students").select("class_id").in("id", studentIds);
+    const classIds = Array.from(new Set((students ?? []).map((s) => s.class_id).filter(Boolean)));
+    
+    // Get latest mission version
+    const { data: latestVersion } = await adminClient
+      .from("mission_versions")
+      .select("id")
+      .eq("mission_id", missionId)
+      .order("version_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestVersion && classIds.length > 0) {
+      for (const cId of classIds) {
+        const { data: existing } = await adminClient
+          .from("mission_assignments")
+          .select("id")
+          .eq("mission_id", missionId)
+          .eq("class_id", cId)
+          .maybeSingle();
+
+        if (!existing) {
+          await adminClient.from("mission_assignments").insert({
+            mission_id: missionId,
+            mission_version_id: latestVersion.id,
+            class_id: cId,
+            assigned_by: access.profile.id,
+            status: "available",
+            available_at: new Date().toISOString()
+          });
+        }
+      }
+    }
+  }
+
+  revalidatePath("/teacher/library");
+  revalidatePath("/admin/library");
+  revalidatePath("/teacher/missions");
+  revalidatePath("/admin/missions");
+
+  return { success: true, count: allStudents ? "all" : studentIds.length };
 }
 
