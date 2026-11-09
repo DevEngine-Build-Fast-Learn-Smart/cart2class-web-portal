@@ -40,7 +40,7 @@ export async function assignedMission(supabase: SupabaseClient, studentId: strin
 }
 
 export async function missionPayload(supabase: SupabaseClient, assignment: Assignment) {
-  const { data: mission, error: missionError } = await supabase.from("missions").select("id,title,description,estimated_minutes,mission_number,stars,store_id,opens_at,expires_at,passage,passage_detail,status,sharing_status").eq("id", assignment.mission_id).eq("status", "published").in("sharing_status", ["approved", "featured"]).maybeSingle();
+  const { data: mission, error: missionError } = await supabase.from("missions").select("id,title,description,estimated_minutes,mission_number,stars,store_id,cover_image,opens_at,expires_at,passage,passage_detail,status,sharing_status").eq("id", assignment.mission_id).eq("status", "published").in("sharing_status", ["approved", "featured"]).maybeSingle();
   if (missionError || !mission) throw new StudentMissionError("This mission is no longer published.", 404);
   if (!mission.store_id) throw new StudentMissionError("This mission does not have an approved store location.", 409);
   const [{ data: store }, { data: products }, { data: assets }, { data: stages }] = await Promise.all([
@@ -77,6 +77,7 @@ export async function missionPayload(supabase: SupabaseClient, assignment: Assig
   if (!sounds.length || !math.length || !passageText) throw new StudentMissionError("This mission is missing required learning content.", 409);
   return {
     id: mission.id, assignmentId: assignment.id, versionId: assignment.mission_version_id, number: mission.mission_number, title: mission.title, description: mission.description, minutes: mission.estimated_minutes, stars: mission.stars,
+    coverImage: mission.cover_image ?? null,
     storeId: store.id, storeName: store.name, opensAt: assignment.available_at ?? mission.opens_at, expiresAt: assignment.due_at ?? mission.expires_at, passage: passageText, passageDetail: mission.passage_detail ?? "",
     products: products.map((product) => ({ id: product.id, name: product.name, barcode: product.barcode, image: product.image_asset ? assetByPath.get(product.image_asset)?.cdn_url ?? product.image_asset : null, priceCents: product.price_cents, weightGrams: product.weight_grams })),
     sounds, math,
@@ -111,7 +112,7 @@ export async function assignedMissionsList(supabase: SupabaseClient, studentId: 
   const missionIds = allowedAssignments.map((a) => a.mission_id);
   const { data: missions } = await supabase
     .from("missions")
-    .select("id, title, description, mission_number, stars, estimated_minutes, opens_at, expires_at, store_id, stores(name)")
+    .select("id, title, description, mission_number, stars, estimated_minutes, cover_image, opens_at, expires_at, store_id, stores(name)")
     .in("id", missionIds)
     .eq("status", "published")
     .in("sharing_status", ["approved", "featured"]);
@@ -135,6 +136,7 @@ export async function assignedMissionsList(supabase: SupabaseClient, studentId: 
       description: mission.description,
       minutes: mission.estimated_minutes,
       stars: mission.stars,
+      coverImage: mission.cover_image ?? null,
       opensAt,
       expiresAt,
       isAvailable: isAvail,
