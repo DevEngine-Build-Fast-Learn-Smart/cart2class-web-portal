@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { roleHome } from "@/lib/constants/roles";
 import type { Membership, Profile, Role } from "@/types/domain";
 
-export async function requireRole(expected: Role) {
+export async function requireAnyRole(allowed: Role[]) {
   const supabase = await createClient();
   if (!supabase) return { unavailable: true as const, profile: null, memberships: [] as Membership[] };
   const { data: { user } } = await supabase.auth.getUser();
@@ -23,10 +23,14 @@ export async function requireRole(expected: Role) {
     : null;
   const typedMemberships = (memberships ?? []) as Membership[];
   if (!typedProfile || typedProfile.account_status !== "active") redirect("/unauthorized?reason=disabled");
-  if (!typedMemberships.some((membership) => membership.role === expected)) {
+  if (!typedMemberships.some((membership) => allowed.includes(membership.role))) {
     const fallback = typedMemberships[0]?.role;
     if (fallback) redirect(roleHome[fallback] as never);
     redirect("/unauthorized");
   }
   return { unavailable: false as const, profile: typedProfile, memberships: typedMemberships, supabase };
+}
+
+export async function requireRole(expected: Role) {
+  return requireAnyRole([expected]);
 }

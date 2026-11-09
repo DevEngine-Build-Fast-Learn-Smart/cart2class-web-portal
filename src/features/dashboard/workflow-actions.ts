@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireRole } from "@/lib/permissions/access";
+import { requireRole, requireAnyRole } from "@/lib/permissions/access";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { processImageUpload } from "@/lib/storage/upload";
 
@@ -14,15 +14,103 @@ export async function createMission(formData: FormData) {
 }
 
 export async function submitMission(formData: FormData) {
-  const access = await requireRole("teacher"); if (access.unavailable || !access.supabase) return;
-  await access.supabase.rpc("submit_mission_for_review", { p_mission_id: String(formData.get("missionId") ?? "") });
-  refresh("/teacher/missions", "/teacher", "/admin/reviews");
+  const access = await requireAnyRole(["teacher", "admin"]);
+  if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
+
+  const missionId = String(formData.get("missionId") ?? "").trim();
+  if (!missionId) return { error: "Mission ID is required." };
+
+  const adminClient = createAdminClient();
+
+  const { error } = await adminClient.from("missions").update({
+    sharing_status: "submitted",
+    status: "draft",
+    updated_at: new Date().toISOString()
+  }).eq("id", missionId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  const userRole = access.memberships.some((m) => m.role === "admin") ? "admin" : "teacher";
+
+  refresh(
+    "/teacher/missions",
+    "/teacher/library",
+    "/admin/reviews",
+    "/admin/missions",
+    "/admin/library",
+    `/${userRole}/missions?id=${missionId}`
+  );
+  return { success: true };
 }
 
 export async function reviewMission(formData: FormData) {
-  const access = await requireRole("admin"); if (access.unavailable || !access.supabase) return;
-  await access.supabase.rpc("review_mission", { p_mission_id: String(formData.get("missionId") ?? ""), p_decision: String(formData.get("decision") ?? ""), p_feedback: String(formData.get("feedback") ?? "") });
-  refresh("/admin/reviews", "/admin/missions", "/teacher/missions");
+  const access = await requireRole("admin");
+  if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
+
+  const missionId = String(formData.get("missionId") ?? "").trim();
+  const decision = String(formData.get("decision") ?? "").trim(); // 'approved' | 'rejected' | 'changes_requested'
+  const feedback = String(formData.get("feedback") ?? "").trim();
+
+  if (!missionId) return { error: "Mission ID is required." };
+  if (!["approved", "rejected", "changes_requested"].includes(decision)) {
+    return { error: "Invalid review decision. Must be approved, rejected, or changes_requested." };
+  }
+
+  const adminClient = createAdminClient();
+
+  // 1. Record review decision and feedback in mission_reviews
+  const { error: reviewErr } = await adminClient.from("mission_reviews").insert({
+    mission_id: missionId,
+    reviewer_user_id: access.profile.id,
+    decision,
+    feedback: feedback || null
+  });
+
+  if (reviewErr) {
+    console.error("Failed to insert into mission_reviews:", reviewErr);
+  }
+
+  // 2. Update mission status according to decision:
+  if (decision === "approved") {
+    // If approved: sharing_status = 'approved', status = 'published' (Active & accessible for students!)
+    await adminClient.from("missions").update({
+      sharing_status: "approved",
+      status: "published",
+      updated_at: new Date().toISOString()
+    }).eq("id", missionId);
+  } else if (decision === "rejected") {
+    // If rejected: sharing_status = 'rejected', status = 'draft' (Not published! Inactive!)
+    await adminClient.from("missions").update({
+      sharing_status: "rejected",
+      status: "draft",
+      updated_at: new Date().toISOString()
+    }).eq("id", missionId);
+  } else {
+    // changes_requested
+    await adminClient.from("missions").update({
+      sharing_status: "under_review",
+      status: "draft",
+      updated_at: new Date().toISOString()
+    }).eq("id", missionId);
+  }
+
+  const reviewerRole = access.memberships.some((m) => m.role === "admin") ? "admin" : "teacher";
+
+  refresh(
+    "/admin/reviews",
+    "/admin/missions",
+    "/admin/library",
+    "/teacher/missions",
+    "/teacher/library",
+    `/${reviewerRole}/missions?id=${missionId}`
+  );
+  return { success: true, decision, feedback };
+}
+
+export async function reviewMissionFormAction(formData: FormData): Promise<void> {
+  await reviewMission(formData);
 }
 
 export async function publishMission(formData: FormData) {

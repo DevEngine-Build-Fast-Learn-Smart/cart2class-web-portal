@@ -1,9 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import Link from "next/link";
 import { AlertCircle, Building2, ClipboardCheck, School, UsersRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { BarcodeExportButton, BulkQrSheetButton, QrExportButton } from "@/components/shared/code-export";
-import { publishMission, reviewMission } from "./workflow-actions";
+import { publishMission, reviewMissionFormAction } from "./workflow-actions";
 
 type Row = Record<string, unknown>;
 const text = (value: unknown) => typeof value === "string" || typeof value === "number" ? String(value) : "—";
@@ -35,11 +36,48 @@ export async function AdminSectionView({ slug, supabase }: { slug: string; supab
       const { data } = await supabase.from("missions").select("id,title,description,status,sharing_status,current_version,estimated_minutes,grade_min,grade_max").order("updated_at", { ascending: false });
       const rows = (data ?? []) as Row[];
       if (slug === "reviews") {
-        const submitted = rows.filter((row) => row.sharing_status === "submitted" || row.sharing_status === "under_review");
-        return <div className="space-y-4">{submitted.length ? submitted.map((row) => <article className="panel p-5" key={text(row.id)}><div className="flex flex-wrap justify-between gap-3"><div><h2 className="font-extrabold">{text(row.title)}</h2><p className="mt-1 text-sm text-muted">v{text(row.current_version)} · {text(row.estimated_minutes)} min</p></div><Badge tone="amber">{text(row.sharing_status)}</Badge></div><p className="mt-3 text-sm text-muted">{text(row.description)}</p><form action={reviewMission} className="mt-4 grid gap-3 md:grid-cols-[11rem_1fr_auto]"><input type="hidden" name="missionId" value={text(row.id)} /><select name="decision" className="h-10 rounded-lg border bg-white px-3 text-sm"><option value="approved">Approve for publishing</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select><input name="feedback" className="h-10 rounded-lg border px-3 text-sm" placeholder="Review feedback" /><button className="rounded-lg bg-navy px-3 py-2 text-sm font-bold text-white">Save decision</button></form></article>) : <EmptyState title="No submitted missions" description="Teacher submissions will appear here for review." />}</div>;
+        const submitted = rows.filter((row) => row.status !== "published" && (row.sharing_status === "submitted" || row.sharing_status === "under_review"));
+        return <div className="space-y-4">{submitted.length ? submitted.map((row) => <article className="panel p-5" key={text(row.id)}><div className="flex flex-wrap justify-between gap-3"><div><h2 className="font-extrabold">{text(row.title)}</h2><p className="mt-1 text-sm text-muted">v{text(row.current_version)} · {text(row.estimated_minutes)} min</p></div><Badge tone="amber">{text(row.sharing_status)}</Badge></div><p className="mt-3 text-sm text-muted">{text(row.description)}</p><form action={reviewMissionFormAction} className="mt-4 grid gap-3 md:grid-cols-[11rem_1fr_auto]"><input type="hidden" name="missionId" value={text(row.id)} /><select name="decision" className="h-10 rounded-lg border bg-white px-3 text-sm"><option value="approved">Approve for publishing</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select><input name="feedback" className="h-10 rounded-lg border px-3 text-sm" placeholder="Review feedback" /><button className="rounded-lg bg-navy px-3 py-2 text-sm font-bold text-white">Save decision</button></form></article>) : <EmptyState title="No submitted missions" description="Teacher submissions will appear here for review." />}</div>;
       }
       const eligible = rows.filter((row) => row.status === "published" && (row.sharing_status === "approved" || row.sharing_status === "featured"));
-      const columns = [{ key: "title", label: "Mission" }, { key: "status", label: "Publication", render: (row: Row) => <Badge tone={statusTone(row.status)}>{text(row.status)}</Badge> }, { key: "sharing_status", label: "Library", render: (row: Row) => <Badge tone={statusTone(row.sharing_status)}>{text(row.sharing_status)}</Badge> }, { key: "current_version", label: "Version", render: (row: Row) => `v${text(row.current_version)}` }, { key: "estimated_minutes", label: "Duration", render: (row: Row) => `${text(row.estimated_minutes)} min` }, { key: "id", label: "Actions", render: (row: Row) => <div className="flex flex-wrap gap-2">{row.sharing_status === "approved" && row.status !== "published" && <form action={publishMission}><input type="hidden" name="missionId" value={text(row.id)} /><button className="rounded-lg bg-navy px-2 py-1.5 text-xs font-bold text-white">Publish</button></form>}{row.status === "published" && (row.sharing_status === "approved" || row.sharing_status === "featured") && <QrExportButton compact type="mission" target={{ id: text(row.id), label: text(row.title), subtitle: `Grades ${text(row.grade_min)}–${text(row.grade_max)} · Mission v${text(row.current_version)}` }} />}</div> }];
+      const columns = [
+        { key: "title", label: "Mission" },
+        { key: "status", label: "Publication", render: (row: Row) => <Badge tone={statusTone(row.status)}>{text(row.status)}</Badge> },
+        { key: "sharing_status", label: "Library", render: (row: Row) => <Badge tone={statusTone(row.sharing_status)}>{text(row.sharing_status)}</Badge> },
+        { key: "current_version", label: "Version", render: (row: Row) => `v${text(row.current_version)}` },
+        { key: "estimated_minutes", label: "Duration", render: (row: Row) => `${text(row.estimated_minutes)} min` },
+        {
+          key: "id",
+          label: "Actions",
+          render: (row: Row) => (
+            <div className="flex flex-wrap gap-2 items-center">
+              <Link
+                href={`/admin/missions?id=${text(row.id)}`}
+                className="rounded-lg bg-blue-50 text-brand px-2 py-1.5 text-xs font-bold hover:bg-blue-100 transition"
+              >
+                Edit / Builder
+              </Link>
+              {row.sharing_status === "approved" && row.status !== "published" && (
+                <form action={publishMission}>
+                  <input type="hidden" name="missionId" value={text(row.id)} />
+                  <button className="rounded-lg bg-navy px-2 py-1.5 text-xs font-bold text-white">Publish</button>
+                </form>
+              )}
+              {row.status === "published" && (row.sharing_status === "approved" || row.sharing_status === "featured") && (
+                <QrExportButton
+                  compact
+                  type="mission"
+                  target={{
+                    id: text(row.id),
+                    label: text(row.title),
+                    subtitle: `Grades ${text(row.grade_min)}–${text(row.grade_max)} · Mission v${text(row.current_version)}`
+                  }}
+                />
+              )}
+            </div>
+          )
+        }
+      ];
       const [{ data: products }, { data: missionProducts }] = await Promise.all([
         supabase.from("products").select("id,name,barcode,barcode_symbology,category").not("barcode", "is", null).order("name"),
         supabase.from("mission_products").select("id,name,barcode").not("barcode", "is", null).order("name")
@@ -68,7 +106,43 @@ export async function AdminSectionView({ slug, supabase }: { slug: string; supab
         }
       }
       const combinedProducts = Array.from(barcodeMap.values());
-      return <div className="space-y-5"><div className="flex justify-end"><BulkQrSheetButton type="mission" label="Published mission QR codes" targets={eligible.map((row) => ({ id: text(row.id), label: text(row.title), subtitle: `Mission QR · v${text(row.current_version)}` }))} /></div><DataTable rows={rows} empty="No missions are available yet." columns={columns} /><section className="panel p-5"><h2 className="font-extrabold">Educational product barcodes ({combinedProducts.length})</h2><p className="mt-1 text-sm text-muted">Print scannable Code128 labels for approved demo, store, and educational product activities.</p><div className="mt-4 grid gap-4 lg:grid-cols-2">{combinedProducts.map((product) => <BarcodeExportButton key={product.barcode} value={product.barcode} label={product.name} subtitle={`${product.category ?? "Educational product"} · ${product.barcode_symbology}`} symbology={product.barcode_symbology as "CODE128" | "EAN13" | "UPC"} />)}</div></section></div>;
+      return (
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Link
+              href="/admin/missions?tab=builder"
+              className="inline-flex items-center gap-2 rounded-xl bg-navy px-4 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-navy/90 transition"
+            >
+              + Open Mission Builder
+            </Link>
+            <BulkQrSheetButton
+              type="mission"
+              label="Published mission QR codes"
+              targets={eligible.map((row) => ({
+                id: text(row.id),
+                label: text(row.title),
+                subtitle: `Mission QR · v${text(row.current_version)}`
+              }))}
+            />
+          </div>
+          <DataTable rows={rows} empty="No missions are available yet." columns={columns} />
+          <section className="panel p-5">
+            <h2 className="font-extrabold">Educational product barcodes ({combinedProducts.length})</h2>
+            <p className="mt-1 text-sm text-muted">Print scannable Code128 labels for approved demo, store, and educational product activities.</p>
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              {combinedProducts.map((product) => (
+                <BarcodeExportButton
+                  key={product.barcode}
+                  value={product.barcode}
+                  label={product.name}
+                  subtitle={`${product.category ?? "Educational product"} · ${product.barcode_symbology}`}
+                  symbology={product.barcode_symbology as "CODE128" | "EAN13" | "UPC"}
+                />
+              ))}
+            </div>
+          </section>
+        </div>
+      );
     }
     if (slug === "settings") { const { data } = await supabase.from("organizations").select("id,name,slug,created_at").order("name"); return <DataTable rows={(data ?? []) as Row[]} empty="No organization settings are available." columns={[{ key: "name", label: "Organization" }, { key: "slug", label: "Identifier" }, { key: "created_at", label: "Created" }]} />; }
     const [schools, classes, students, stores] = await Promise.all([supabase.from("schools").select("id", { count: "exact", head: true }), supabase.from("classes").select("id", { count: "exact", head: true }), supabase.from("students").select("id", { count: "exact", head: true }), supabase.from("stores").select("id", { count: "exact", head: true })]); return <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[["Schools", schools.count], ["Classes", classes.count], ["Students", students.count], ["Partner stores", stores.count]].map(([label, value]) => <article className="panel p-5" key={String(label)}><p className="text-sm font-bold text-muted">{label}</p><p className="metric-value mt-2">{value ?? 0}</p></article>)}</div>;

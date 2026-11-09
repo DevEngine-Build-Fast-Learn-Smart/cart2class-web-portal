@@ -22,11 +22,18 @@ import {
   BookOpen,
   ArrowRight,
   TrendingUp,
-  Award
+  Award,
+  AlertCircle,
+  MessageSquare,
+  Send,
+  Loader2,
+  CheckCheck
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toggleMissionStatus, cloneMission } from "./mission-library-actions";
+import { submitMission } from "@/features/dashboard/workflow-actions";
+import { CreateMissionModal } from "./create-mission-modal";
 
 type Row = Record<string, any>;
 
@@ -37,6 +44,7 @@ export function MissionLibraryView({
   students = [],
   classes = [],
   stores = [],
+  reviews = [],
   role = "teacher"
 }: {
   missions: Row[];
@@ -45,6 +53,7 @@ export function MissionLibraryView({
   students: Row[];
   classes: Row[];
   stores: Row[];
+  reviews?: Row[];
   role: "teacher" | "admin";
 }) {
   const [searchTerm, setSearchTerm] = useState("");
@@ -54,6 +63,7 @@ export function MissionLibraryView({
   const [selectedMissionForResults, setSelectedMissionForResults] = useState<Row | null>(null);
   const [isToggling, setIsToggling] = useState<string | null>(null);
   const [isCloning, setIsCloning] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState<string | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -122,7 +132,9 @@ export function MissionLibraryView({
       sharingFilter === "all" ||
       (sharingFilter === "featured" && m.sharing_status === "featured") ||
       (sharingFilter === "approved" && m.sharing_status === "approved") ||
-      (sharingFilter === "community" && (m.sharing_status === "community" || !m.sharing_status));
+      (sharingFilter === "submitted" && m.sharing_status === "submitted") ||
+      (sharingFilter === "rejected" && m.sharing_status === "rejected") ||
+      (sharingFilter === "community" && (m.sharing_status === "community" || m.sharing_status === "draft" || !m.sharing_status));
 
     return matchesSearch && matchesGrade && matchesStatus && matchesSharing;
   });
@@ -152,11 +164,20 @@ export function MissionLibraryView({
             Explore standards-aligned K–2 grocery discovery missions. Edit questions with rich option pictures, toggle live status, inspect student participation, and clone missions for your classroom.
           </p>
         </div>
-        <Link href={`/${role}/missions`}>
-          <Button className="bg-navy text-white font-bold h-11 px-5 shadow-sm">
-            <Plus className="mr-2 h-4 w-4" /> Open Mission Builder
-          </Button>
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <CreateMissionModal
+            role={role}
+            stores={stores}
+            classes={classes}
+            triggerText="Create New Mission"
+            triggerClassName="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-11 px-5 shadow-sm"
+          />
+          <Link href={`/${role}/missions`}>
+            <Button variant="secondary" className="border-line text-navy hover:bg-slate-100 font-bold h-11 px-5">
+              Open Mission Builder
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* KPI Stats Bar */}
@@ -263,9 +284,11 @@ export function MissionLibraryView({
               className="h-10 rounded-xl border border-line bg-slate-50 px-3 text-xs font-bold text-ink focus:border-brand focus:outline-none"
             >
               <option value="all">All Sharing</option>
+              <option value="approved">Approved & Active</option>
+              <option value="submitted">Awaiting Review</option>
+              <option value="rejected">Rejected / Changes Needed</option>
               <option value="featured">Featured by A.L.M.A.</option>
-              <option value="approved">Approved</option>
-              <option value="community">Community Submissions</option>
+              <option value="community">Drafts / Inactive</option>
             </select>
           </div>
         </div>
@@ -283,7 +306,10 @@ export function MissionLibraryView({
               participants: []
             };
             const isPublished = m.status === "published";
+            const isRejected = !isPublished && m.sharing_status === "rejected";
+            const isSubmitted = !isPublished && (m.sharing_status === "submitted" || m.sharing_status === "under_review");
             const storeName = m.store_id ? storeMap.get(m.store_id) : "Partner Store";
+            const latestReview = reviews.find((r) => r.mission_id === m.id);
 
             return (
               <article
@@ -292,28 +318,59 @@ export function MissionLibraryView({
               >
                 {/* Card Top: Badges & Status */}
                 <div className="p-6 space-y-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span
-                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold ${
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-black shadow-2xs ${
                           isPublished
-                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                            : "bg-amber-50 text-amber-700 border border-amber-200"
+                            ? "bg-emerald-50 text-emerald-800 border border-emerald-300"
+                            : isRejected
+                            ? "bg-rose-50 text-rose-800 border border-rose-300"
+                            : isSubmitted
+                            ? "bg-amber-50 text-amber-900 border border-amber-300"
+                            : "bg-slate-100 text-slate-700 border border-slate-300"
                         }`}
                       >
-                        <span className={`h-2 w-2 rounded-full ${isPublished ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`} />
-                        {isPublished ? "Active / Published" : "Inactive / Draft"}
+                        <span
+                          className={`h-2 w-2 rounded-full ${
+                            isPublished
+                              ? "bg-emerald-500 animate-pulse"
+                              : isRejected
+                              ? "bg-rose-500"
+                              : isSubmitted
+                              ? "bg-amber-500 animate-pulse"
+                              : "bg-slate-400"
+                          }`}
+                        />
+                        {isPublished
+                          ? "Active & Published"
+                          : isRejected
+                          ? "Revisions Needed"
+                          : isSubmitted
+                          ? "In Admin Review"
+                          : "Draft Mode"}
                       </span>
-                      {m.sharing_status === "featured" ? (
-                        <Badge tone="purple">Featured</Badge>
+
+                      {isPublished ? (
+                        m.sharing_status === "featured" ? (
+                          <Badge tone="purple">Featured</Badge>
+                        ) : (
+                          <Badge tone="green">Approved</Badge>
+                        )
+                      ) : isRejected ? (
+                        <Badge tone="rose">Action Needed</Badge>
+                      ) : isSubmitted ? (
+                        <Badge tone="amber">Pending Approval</Badge>
                       ) : (
-                        <Badge tone="blue">{m.sharing_status || "Approved"}</Badge>
+                        <Badge tone="slate">Draft</Badge>
                       )}
                     </div>
-                    <span className="inline-flex items-center gap-1 text-xs font-black text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
-                      <Star className="h-3 w-3 fill-amber-500 text-amber-500" />
-                      {m.stars || 5} Stars
-                    </span>
+
+                    {/* Star Chip */}
+                    <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 border border-amber-300 px-3 py-1 text-xs font-black text-amber-900 shadow-2xs">
+                      <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500 shrink-0" />
+                      <span>{m.stars || 5} Stars</span>
+                    </div>
                   </div>
 
                   <div>
@@ -322,6 +379,27 @@ export function MissionLibraryView({
                       {m.description || "A four-step grocery learning mission covering phonemic awareness, product barcode scanning, oral reading fluency, and math."}
                     </p>
                   </div>
+
+                  {/* Rejection Feedback Note */}
+                  {isRejected && (
+                    <div className="rounded-xl border border-rose-200 bg-rose-50/80 p-3 text-xs space-y-1 shadow-2xs">
+                      <div className="flex items-center gap-1.5 font-bold text-rose-800">
+                        <AlertCircle className="h-3.5 w-3.5 text-rose-600 shrink-0" />
+                        <span>Admin Review Feedback:</span>
+                      </div>
+                      <p className="text-xs text-rose-900 italic font-medium leading-relaxed pl-4 border-l-2 border-rose-400">
+                        {latestReview?.feedback ? `"${latestReview.feedback}"` : "Revisions requested by administrator before publishing."}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Submitted Note */}
+                  {isSubmitted && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-2.5 text-xs text-amber-800 flex items-center gap-2 font-semibold">
+                      <Clock className="h-3.5 w-3.5 text-amber-600 animate-pulse shrink-0" />
+                      <span>Submitted for admin review. Students cannot access until approved.</span>
+                    </div>
+                  )}
 
                   <div className="flex flex-wrap items-center gap-3 text-xs text-muted font-bold pt-1">
                     <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-1">
@@ -355,12 +433,89 @@ export function MissionLibraryView({
                 {/* Card Bottom: Action Buttons */}
                 <div className="border-t bg-slate-50/60 p-4 space-y-2">
                   <div className="grid grid-cols-2 gap-2">
+                    {/* Direct Student Preview */}
+                    <Link href={`/${role}/missions?id=${m.id}&preview=true`} className="w-full">
+                      <Button
+                        variant="secondary"
+                        className="w-full text-xs font-bold h-9 bg-blue-50/80 hover:bg-blue-100 text-brand border border-blue-200 shadow-2xs"
+                      >
+                        <Eye className="mr-1.5 h-3.5 w-3.5 text-brand" /> Student Preview
+                      </Button>
+                    </Link>
+
                     {/* Edit in Builder */}
                     <Link href={`/${role}/missions?id=${m.id}`} className="w-full">
                       <Button variant="secondary" className="w-full text-xs font-bold h-9">
                         <Edit3 className="mr-1.5 h-3.5 w-3.5" /> Edit / Builder
                       </Button>
                     </Link>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    {/* Role-Specific Primary Workflow Action */}
+                    {role === "teacher" && !isPublished ? (
+                      isSubmitted ? (
+                        <div className="flex items-center justify-center rounded-lg border border-amber-300 bg-amber-100/70 px-2 py-1 text-[11px] font-bold text-amber-900">
+                          <Clock className="mr-1 h-3 w-3 text-amber-700 animate-pulse" /> In Admin Review
+                        </div>
+                      ) : (
+                        <form
+                          action={async (fd) => {
+                            setIsSubmitting(m.id);
+                            const res = await submitMission(fd);
+                            setIsSubmitting(null);
+                            if (res?.error) {
+                              showToast(`Error: ${res.error}`);
+                            } else {
+                              showToast(`Mission "${m.title}" submitted for admin review!`);
+                            }
+                          }}
+                        >
+                          <input type="hidden" name="missionId" value={m.id} />
+                          <Button
+                            type="submit"
+                            disabled={isSubmitting === m.id}
+                            className="w-full text-xs font-bold h-9 bg-navy text-white hover:bg-navy-lighter"
+                          >
+                            {isSubmitting === m.id ? (
+                              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Send className="mr-1.5 h-3.5 w-3.5" />
+                            )}
+                            {isRejected ? "Resubmit" : "Submit Review"}
+                          </Button>
+                        </form>
+                      )
+                    ) : (
+                      /* Toggle Active / Inactive */
+                      <form
+                        action={async (fd) => {
+                          setIsToggling(m.id);
+                          const res = await toggleMissionStatus(fd);
+                          setIsToggling(null);
+                          if (res?.error) {
+                            showToast(res.error);
+                          } else {
+                            showToast(`Mission "${m.title}" is now ${isPublished ? "Inactive (Draft)" : "Active (Published)"}!`);
+                          }
+                        }}
+                      >
+                        <input type="hidden" name="missionId" value={m.id} />
+                        <input type="hidden" name="currentStatus" value={m.status || "draft"} />
+                        <Button
+                          type="submit"
+                          disabled={isToggling === m.id}
+                          className={`w-full text-xs font-bold h-9 ${
+                            isPublished
+                              ? "bg-amber-100 text-amber-900 hover:bg-amber-200"
+                              : "bg-emerald-600 text-white hover:bg-emerald-700"
+                          }`}
+                        >
+                          <Power className="mr-1.5 h-3.5 w-3.5" />
+                          {isPublished ? "Make Inactive" : role === "admin" ? "Approve & Activate" : "Make Active"}
+                        </Button>
+                      </form>
+                    )}
 
                     {/* View Results Modal */}
                     <Button
@@ -368,58 +523,8 @@ export function MissionLibraryView({
                       onClick={() => setSelectedMissionForResults(m)}
                       className="text-xs font-bold h-9 bg-white hover:bg-blue-50 hover:text-brand"
                     >
-                      <Eye className="mr-1.5 h-3.5 w-3.5 text-brand" /> Results ({metrics.participants.length})
+                      <Trophy className="mr-1.5 h-3.5 w-3.5 text-amber-600" /> Results ({metrics.participants.length})
                     </Button>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    {/* Toggle Active / Inactive */}
-                    <form
-                      action={async (fd) => {
-                        setIsToggling(m.id);
-                        await toggleMissionStatus(fd);
-                        setIsToggling(null);
-                        showToast(`Mission "${m.title}" is now ${isPublished ? "Inactive (Draft)" : "Active (Published)"}!`);
-                      }}
-                    >
-                      <input type="hidden" name="missionId" value={m.id} />
-                      <input type="hidden" name="currentStatus" value={m.status || "draft"} />
-                      <Button
-                        type="submit"
-                        disabled={isToggling === m.id}
-                        className={`w-full text-xs font-bold h-9 ${
-                          isPublished
-                            ? "bg-amber-100 text-amber-900 hover:bg-amber-200"
-                            : "bg-emerald-600 text-white hover:bg-emerald-700"
-                        }`}
-                      >
-                        <Power className="mr-1.5 h-3.5 w-3.5" />
-                        {isPublished ? "Make Inactive" : "Make Active"}
-                      </Button>
-                    </form>
-
-                    {/* Clone Mission */}
-                    <form
-                      action={async (fd) => {
-                        setIsCloning(m.id);
-                        const res = await cloneMission(fd);
-                        setIsCloning(null);
-                        if (res?.success) {
-                          showToast(`Successfully created customizable copy of "${m.title}"!`);
-                        }
-                      }}
-                    >
-                      <input type="hidden" name="missionId" value={m.id} />
-                      <Button
-                        type="submit"
-                        disabled={isCloning === m.id}
-                        variant="ghost"
-                        className="w-full text-xs font-bold h-9 border hover:bg-white"
-                      >
-                        <Copy className="mr-1.5 h-3.5 w-3.5 text-muted" />
-                        {isCloning === m.id ? "Copying..." : "Clone Mission"}
-                      </Button>
-                    </form>
                   </div>
                 </div>
               </article>

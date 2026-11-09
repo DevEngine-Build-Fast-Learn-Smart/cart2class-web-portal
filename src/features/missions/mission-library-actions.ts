@@ -1,11 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireRole } from "@/lib/permissions/access";
+import { requireAnyRole } from "@/lib/permissions/access";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function toggleMissionStatus(formData: FormData) {
-  const access = await requireRole("teacher");
+  const access = await requireAnyRole(["teacher", "admin"]);
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
 
   const missionId = String(formData.get("missionId") ?? "").trim();
@@ -13,24 +13,58 @@ export async function toggleMissionStatus(formData: FormData) {
   const newStatus = currentStatus === "published" ? "draft" : "published";
 
   const adminClient = createAdminClient();
+  const isAdmin = access.memberships.some((m) => m.role === "admin");
+
+  if (newStatus === "published" && !isAdmin) {
+    const { data: m } = await adminClient
+      .from("missions")
+      .select("sharing_status")
+      .eq("id", missionId)
+      .single();
+
+    if (m && m.sharing_status !== "approved" && m.sharing_status !== "featured") {
+      return {
+        error: "This mission must be approved by an administrator before it can be published to student tablets."
+      };
+    }
+  }
+
+  const updatePayload: Record<string, any> = {
+    status: newStatus,
+    updated_at: new Date().toISOString()
+  };
+
+  if (newStatus === "published" && isAdmin) {
+    updatePayload.sharing_status = "approved";
+  }
+
   const { error } = await adminClient
     .from("missions")
-    .update({
-      status: newStatus,
-      updated_at: new Date().toISOString()
-    })
+    .update(updatePayload)
     .eq("id", missionId);
 
   if (error) return { error: error.message };
 
+  if (newStatus === "published" && isAdmin) {
+    await adminClient.from("mission_reviews").insert({
+      mission_id: missionId,
+      reviewer_user_id: access.profile.id,
+      decision: "approved",
+      feedback: "Approved and published for students"
+    });
+  }
+
   revalidatePath("/teacher/library");
   revalidatePath("/teacher/missions");
   revalidatePath("/admin/missions");
+  revalidatePath("/admin/library");
+  revalidatePath("/admin/reviews");
+  revalidatePath("/admin");
   return { success: true, status: newStatus };
 }
 
 export async function cloneMission(formData: FormData) {
-  const access = await requireRole("teacher");
+  const access = await requireAnyRole(["teacher", "admin"]);
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
 
   const sourceMissionId = String(formData.get("missionId") ?? "").trim();
@@ -167,7 +201,7 @@ export async function cloneMission(formData: FormData) {
 }
 
 export async function updateMissionSharing(formData: FormData) {
-  const access = await requireRole("teacher");
+  const access = await requireAnyRole(["teacher", "admin"]);
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
 
   const missionId = String(formData.get("missionId") ?? "").trim();

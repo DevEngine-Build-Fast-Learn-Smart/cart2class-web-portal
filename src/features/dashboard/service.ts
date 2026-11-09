@@ -94,7 +94,7 @@ export async function getDashboardData(client: SupabaseClient, role: Role, userI
       { data: storesList },
       { data: recentAudits }
     ] = await Promise.all([
-      client.from("missions").select("id,title,description,current_version,estimated_minutes,sharing_status").in("sharing_status", ["submitted", "under_review"]).limit(5),
+      client.from("missions").select("id,title,description,current_version,estimated_minutes,sharing_status").eq("status", "draft").in("sharing_status", ["submitted", "under_review"]).limit(5),
       client.from("schools").select("id,name,address,district_name,nces_id,agreement_status").limit(5),
       client.from("stores").select("id,name,address,representative_name").limit(5),
       client.from("audit_logs").select("id,action,entity_type,created_at").order("created_at", { ascending: false }).limit(4)

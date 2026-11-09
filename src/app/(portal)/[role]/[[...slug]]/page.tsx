@@ -265,20 +265,29 @@ export default async function PortalPage({
     } else if (["legal", "deletion-requests", "audit-logs"].includes(currentSlug)) {
       content = <AdminLegalView slug={currentSlug as "legal" | "deletion-requests" | "audit-logs"} supabase={supabase} />;
     } else if (currentSlug === "library") {
+      // Auto-synchronize any published missions whose sharing status was pending
+      await supabase
+        .from("missions")
+        .update({ sharing_status: "approved" })
+        .eq("status", "published")
+        .in("sharing_status", ["submitted", "draft"]);
+
       const [
         { data: missions },
         { data: attempts },
         { data: assignments },
         { data: students },
         { data: classes },
-        { data: stores }
+        { data: stores },
+        { data: reviews }
       ] = await Promise.all([
         supabase.from("missions").select("*").order("updated_at", { ascending: false }),
         supabase.from("mission_attempts").select("*").order("started_at", { ascending: false }),
         supabase.from("mission_assignments").select("*"),
         supabase.from("students").select("id,first_name,last_initial,grade_level,class_id"),
         supabase.from("classes").select("id,name,grade_level"),
-        supabase.from("stores").select("id,name")
+        supabase.from("stores").select("id,name"),
+        supabase.from("mission_reviews").select("*").order("created_at", { ascending: false })
       ]);
 
       content = (
@@ -289,8 +298,111 @@ export default async function PortalPage({
           students={students ?? []}
           classes={classes ?? []}
           stores={stores ?? []}
+          reviews={reviews ?? []}
           role="admin"
         />
+      );
+    } else if (currentSlug === "missions" && (requestedMissionId || query.tab === "builder")) {
+      let mission: Row;
+      if (requestedMissionId) {
+        const { data: m } = await supabase
+          .from("missions")
+          .select("*")
+          .eq("id", requestedMissionId)
+          .single();
+
+        mission = m || {
+          id: requestedMissionId,
+          title: "Custom Grocery Mission",
+          description: "Standards-aligned learning mission",
+          grade_min: 0,
+          grade_max: 2,
+          estimated_minutes: 12,
+          stars: 5,
+          status: "draft",
+          sharing_status: "community"
+        };
+      } else {
+        const { data: missions } = await supabase
+          .from("missions")
+          .select("*")
+          .order("updated_at", { ascending: false })
+          .limit(1);
+
+        mission = missions?.[0] || {
+          id: "00000000-0000-0000-0000-000000000051",
+          title: "Fruit & Veggie Hunt",
+          description: "A little shopping. A lot of discovery!",
+          grade_min: 0,
+          grade_max: 2,
+          estimated_minutes: 12,
+          stars: 5,
+          status: "published",
+          sharing_status: "approved"
+        };
+      }
+
+      const [
+        { data: allMissions },
+        { data: versions },
+        { data: products },
+        { data: assets },
+        { data: stores },
+        { data: classes },
+        { data: reviews }
+      ] = await Promise.all([
+        supabase.from("missions").select("id,title,mission_number,status,sharing_status").order("updated_at", { ascending: false }),
+        supabase.from("mission_versions").select("id").eq("mission_id", mission.id).limit(1),
+        supabase.from("mission_products").select("*").eq("mission_id", mission.id).order("order_index"),
+        supabase.from("mission_assets").select("*").or(`mission_id.eq.${mission.id},mission_id.is.null`),
+        supabase.from("stores").select("id,name").order("name"),
+        supabase.from("classes").select("id,name,grade_level").order("name"),
+        supabase.from("mission_reviews").select("*").eq("mission_id", mission.id).order("created_at", { ascending: false })
+      ]);
+
+      const versionId = versions?.[0]?.id;
+      let stages: Row[] = [];
+      let questionsByStage: Record<string, Row[]> = {};
+
+      if (versionId) {
+        const { data: stagesData } = await supabase
+          .from("mission_stages")
+          .select("*")
+          .eq("mission_version_id", versionId)
+          .order("stage_order");
+
+        stages = stagesData ?? [];
+
+        if (stages.length > 0) {
+          const stageIds = stages.map((s) => s.id);
+          const { data: questions } = await supabase
+            .from("mission_questions")
+            .select("*")
+            .in("stage_id", stageIds)
+            .order("question_order");
+
+          for (const q of questions ?? []) {
+            if (!questionsByStage[q.stage_id]) questionsByStage[q.stage_id] = [];
+            questionsByStage[q.stage_id].push(q);
+          }
+        }
+      }
+
+      content = (
+        <main className="page-shell">
+          <MissionBuilderView
+            mission={mission}
+            stages={stages}
+            questionsByStage={questionsByStage}
+            products={products ?? []}
+            assets={assets ?? []}
+            stores={stores ?? []}
+            allMissions={allMissions ?? []}
+            classes={classes ?? []}
+            reviews={reviews ?? []}
+            role="admin"
+          />
+        </main>
       );
     } else {
       content = <AdminSectionView slug={currentSlug} supabase={supabase} />;
@@ -369,20 +481,29 @@ export default async function PortalPage({
     }
   } else if (role === "teacher") {
     if (currentSlug === "library") {
+      // Auto-synchronize any published missions whose sharing status was pending
+      await supabase
+        .from("missions")
+        .update({ sharing_status: "approved" })
+        .eq("status", "published")
+        .in("sharing_status", ["submitted", "draft"]);
+
       const [
         { data: missions },
         { data: attempts },
         { data: assignments },
         { data: students },
         { data: classes },
-        { data: stores }
+        { data: stores },
+        { data: reviews }
       ] = await Promise.all([
         supabase.from("missions").select("*").order("updated_at", { ascending: false }),
         supabase.from("mission_attempts").select("*").order("started_at", { ascending: false }),
         supabase.from("mission_assignments").select("*"),
         supabase.from("students").select("id,first_name,last_initial,grade_level,class_id"),
         supabase.from("classes").select("id,name,grade_level"),
-        supabase.from("stores").select("id,name")
+        supabase.from("stores").select("id,name"),
+        supabase.from("mission_reviews").select("*").order("created_at", { ascending: false })
       ]);
 
       content = (
@@ -393,6 +514,7 @@ export default async function PortalPage({
           students={students ?? []}
           classes={classes ?? []}
           stores={stores ?? []}
+          reviews={reviews ?? []}
           role="teacher"
         />
       );
@@ -438,15 +560,21 @@ export default async function PortalPage({
       }
 
       const [
+        { data: allMissions },
         { data: versions },
         { data: products },
         { data: assets },
-        { data: stores }
+        { data: stores },
+        { data: classes },
+        { data: reviews }
       ] = await Promise.all([
+        supabase.from("missions").select("id,title,mission_number,status,sharing_status").order("updated_at", { ascending: false }),
         supabase.from("mission_versions").select("id").eq("mission_id", mission.id).limit(1),
         supabase.from("mission_products").select("*").eq("mission_id", mission.id).order("order_index"),
         supabase.from("mission_assets").select("*").or(`mission_id.eq.${mission.id},mission_id.is.null`),
-        supabase.from("stores").select("id,name").order("name")
+        supabase.from("stores").select("id,name").order("name"),
+        supabase.from("classes").select("id,name,grade_level").order("name"),
+        supabase.from("mission_reviews").select("*").eq("mission_id", mission.id).order("created_at", { ascending: false })
       ]);
 
       const versionId = versions?.[0]?.id;
@@ -486,6 +614,10 @@ export default async function PortalPage({
             products={products ?? []}
             assets={assets ?? []}
             stores={stores ?? []}
+            allMissions={allMissions ?? []}
+            classes={classes ?? []}
+            reviews={reviews ?? []}
+            role="teacher"
           />
         </main>
       );

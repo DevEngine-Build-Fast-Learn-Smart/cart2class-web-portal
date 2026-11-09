@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AudioPlayer } from "@/components/ui/audio-player";
 import type { Activity, Metric, Role } from "@/types/domain";
 import { roleLabels } from "@/lib/constants/roles";
 
@@ -240,12 +241,10 @@ export function DashboardView({
                         </span>
                         <Badge tone="amber">Pending Review</Badge>
                       </div>
-                      <p className="text-xs text-muted">Passage: Fresh Corn</p>
-                      <audio
-                        controls
-                        preload="metadata"
+                      <AudioPlayer
                         src={rec.playback_url || "/sample-reading-recording.wav"}
-                        className="w-full h-9 mt-1"
+                        title="Passage: Fresh Corn"
+                        className="mt-2"
                       />
                     </div>
                   ))}

@@ -1,14 +1,282 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireRole } from "@/lib/permissions/access";
+import { requireAnyRole } from "@/lib/permissions/access";
 import { createAdminClient } from "@/lib/supabase/admin";
 import crypto from "crypto";
 
 const refresh = (...paths: string[]) => paths.forEach((path) => revalidatePath(path));
 
+export async function createNewMission(formData: FormData) {
+  const access = await requireAnyRole(["teacher", "admin"]);
+  if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
+
+  const title = String(formData.get("title") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim();
+  const storeId = String(formData.get("storeId") ?? "").trim();
+  const gradeMin = Number(formData.get("gradeMin") ?? 0);
+  const gradeMax = Number(formData.get("gradeMax") ?? 2);
+  const estimatedMinutes = Number(formData.get("estimatedMinutes") ?? 12);
+  const stars = Number(formData.get("stars") ?? 5);
+  const opensAt = String(formData.get("opensAt") ?? "").trim();
+  const expiresAt = String(formData.get("expiresAt") ?? "").trim();
+  const classIds = formData.getAll("classIds").map(String).filter(Boolean);
+  let coverImageUrl = String(formData.get("coverImageUrl") ?? "").trim();
+  const coverFile = formData.get("coverFile") as File | null;
+
+  if (!title) return { error: "Mission title is required." };
+
+  const adminClient = createAdminClient();
+
+  // Handle uploaded cover image if provided
+  if (coverFile && coverFile.size > 0) {
+    if (coverFile.size > 5 * 1024 * 1024) {
+      return { error: "Cover image must be less than 5MB." };
+    }
+    try {
+      const buffer = Buffer.from(await coverFile.arrayBuffer());
+      const fileName = `cover_${Date.now()}_${coverFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const storagePath = `covers/${fileName}`;
+      const { error: uploadErr } = await adminClient.storage
+        .from("mission-assets")
+        .upload(storagePath, buffer, { contentType: coverFile.type || "image/png", upsert: true });
+
+      if (!uploadErr) {
+        const { data: pubUrl } = adminClient.storage.from("mission-assets").getPublicUrl(storagePath);
+        if (pubUrl?.publicUrl) coverImageUrl = pubUrl.publicUrl;
+      } else {
+        coverImageUrl = `data:${coverFile.type || "image/png"};base64,${buffer.toString("base64")}`;
+      }
+    } catch (_) {}
+  }
+
+  // Determine highest current mission number to increment
+  const { data: maxMission } = await adminClient
+    .from("missions")
+    .select("mission_number")
+    .order("mission_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const nextMissionNumber = (maxMission?.mission_number ?? 4) + 1;
+
+  // Resolve storeId: if not selected, default to the first active store
+  let resolvedStoreId: string | null = storeId || null;
+  if (!resolvedStoreId) {
+    const { data: defaultStore } = await adminClient
+      .from("stores")
+      .select("id")
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+    resolvedStoreId = defaultStore?.id ?? null;
+  }
+
+  // Get organization id (from profile or first organization)
+  const { data: org } = await adminClient.from("organizations").select("id").limit(1).maybeSingle();
+  const orgId = org?.id || "00000000-0000-0000-0000-000000000001";
+
+  // Determine initial status based on role and submission preference
+  // Teachers MUST submit for admin review; only after admin approval does it become published & active for students.
+  const isAdmin = access.memberships.some((m) => m.role === "admin");
+  const isTeacher = !isAdmin;
+  const submitImmediately = formData.get("submitForReview") === "true" || formData.get("submitForReview") === "on";
+
+  let initialStatus: "draft" | "published" = "draft";
+  let initialSharingStatus: string = "draft";
+
+  if (!isTeacher) {
+    // Admin directly creating can publish immediately or draft
+    initialStatus = "published";
+    initialSharingStatus = "approved";
+  } else {
+    // Teacher creating: must be reviewed by admin before publishing
+    initialStatus = "draft";
+    initialSharingStatus = submitImmediately ? "submitted" : "draft";
+  }
+
+  // 1. Insert into missions table
+  const { data: newMission, error: missionErr } = await adminClient
+    .from("missions")
+    .insert({
+      organization_id: orgId,
+      creator_user_id: access.profile.id,
+      title,
+      description: description || "Interactive grocery discovery mission",
+      grade_min: Math.max(0, Math.min(2, gradeMin)),
+      grade_max: Math.max(gradeMin, Math.min(2, gradeMax)),
+      estimated_minutes: Math.max(1, Math.min(60, estimatedMinutes)),
+      stars: Math.max(1, stars),
+      store_id: resolvedStoreId,
+      cover_image: coverImageUrl || null,
+      status: initialStatus,
+      sharing_status: initialSharingStatus,
+      mission_number: nextMissionNumber,
+      current_version: 1,
+      opens_at: opensAt ? new Date(opensAt).toISOString() : null,
+      expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+      passage: title,
+      passage_detail: description || `Welcome to ${title}!`
+    })
+    .select("*")
+    .single();
+
+  if (missionErr || !newMission) {
+    return { error: missionErr?.message || "Failed to create mission." };
+  }
+
+  // 2. Insert into mission_versions table
+  const { data: newVersion, error: verErr } = await adminClient
+    .from("mission_versions")
+    .insert({
+      mission_id: newMission.id,
+      version_number: 1,
+      title: newMission.title,
+      description: newMission.description,
+      learning_objectives: ["Phonemic awareness", "Product barcode scanning", "Oral reading fluency", "Grocery math"],
+      created_by: access.profile.id,
+      snapshot: {}
+    })
+    .select("*")
+    .single();
+
+  if (verErr || !newVersion) {
+    return { error: verErr?.message || "Failed to create mission version." };
+  }
+
+  // 3. Insert the 4 standard learning stages
+  const stageDefs = [
+    {
+      mission_version_id: newVersion.id,
+      stage_key: "phonemic_awareness",
+      stage_order: 1,
+      title: "Stage 1: Phonemic Awareness & Sounds",
+      prompt_text: "Listen and find the sound.",
+      recording_enabled: false,
+      duration_seconds: 60
+    },
+    {
+      mission_version_id: newVersion.id,
+      stage_key: "phonics",
+      stage_order: 2,
+      title: "Stage 2: Grocery Products & Barcodes",
+      prompt_text: "Find and scan the items.",
+      recording_enabled: false,
+      duration_seconds: 120
+    },
+    {
+      mission_version_id: newVersion.id,
+      stage_key: "fluency",
+      stage_order: 3,
+      title: title,
+      prompt_text: "Read the passage aloud.",
+      passage_text: description || `Welcome to the grocery store! Look for fresh and healthy foods. Each item helps you grow strong and learn new words.`,
+      instructions: "Read aloud clearly into your device microphone.",
+      recording_enabled: true,
+      duration_seconds: 45
+    },
+    {
+      mission_version_id: newVersion.id,
+      stage_key: "math",
+      stage_order: 4,
+      title: "Stage 4: Grocery Mathematics",
+      prompt_text: "Compare prices and quantities.",
+      recording_enabled: false,
+      duration_seconds: 60
+    }
+  ];
+
+  const { data: createdStages, error: stagesErr } = await adminClient
+    .from("mission_stages")
+    .insert(stageDefs)
+    .select("*");
+
+  if (stagesErr || !createdStages) {
+    return { error: stagesErr?.message || "Failed to create mission stages." };
+  }
+
+  const stageByKey = new Map(createdStages.map((s) => [s.stage_key, s.id]));
+
+  // 4. Seed starter sound question
+  const stage1Id = stageByKey.get("phonemic_awareness");
+  if (stage1Id) {
+    await adminClient.from("mission_questions").insert({
+      stage_id: stage1Id,
+      question_order: 1,
+      question_type: "picture_choice",
+      prompt_text: "Which one starts with /a/?",
+      spoken_prompt: "Which word begins with the sound ah?",
+      hint_text: "Listen: ah, ah, apple.",
+      answer_config: {
+        correct: "apple",
+        options: ["apple", "banana", "carrot", "corn"],
+        optionImages: {
+          apple: "/assets/images/apple.svg",
+          banana: "/assets/images/banana.svg",
+          carrot: "/assets/images/carrot.svg",
+          corn: "/assets/images/corn.svg"
+        }
+      },
+      skill_tags: ["phonemic_awareness"]
+    });
+  }
+
+  // 5. Seed starter product
+  await adminClient.from("mission_products").insert({
+    mission_id: newMission.id,
+    name: "Fresh Apples",
+    description: "Crisp sweet red apples in produce",
+    barcode: "C2CAPPLE001",
+    image_asset: "assets/images/apple.svg",
+    price_cents: 149,
+    currency: "USD",
+    weight_grams: 400,
+    package_size: "1 lb bag",
+    instructions: "Find fresh apples in the produce section and scan the barcode label.",
+    order_index: 1,
+    is_available: true
+  });
+
+  // 6. Seed starter math question
+  const stage4Id = stageByKey.get("math");
+  if (stage4Id) {
+    await adminClient.from("mission_questions").insert({
+      stage_id: stage4Id,
+      question_order: 1,
+      question_type: "math",
+      question_kind: "priceLess",
+      prompt_text: "Which item costs less?",
+      spoken_prompt: "Which grocery item costs less?",
+      hint_text: "Compare the prices.",
+      answer_config: {
+        correct: "corn ($0.89)",
+        options: ["corn ($0.89)", "apples ($1.49)"]
+      },
+      skill_tags: ["math", "priceLess"]
+    });
+  }
+
+  // 7. Assign mission to selected classrooms
+  if (classIds.length > 0) {
+    const assignmentRows = classIds.map((cId) => ({
+      mission_id: newMission.id,
+      mission_version_id: newVersion.id,
+      class_id: cId,
+      assigned_by: access.profile.id,
+      available_at: opensAt ? new Date(opensAt).toISOString() : new Date().toISOString(),
+      due_at: expiresAt ? new Date(expiresAt).toISOString() : new Date(Date.now() + 30 * 86400000).toISOString(),
+      status: "available"
+    }));
+
+    await adminClient.from("mission_assignments").insert(assignmentRows);
+  }
+
+  refresh("/teacher/missions", "/admin/missions", "/teacher/library", "/admin/library", "/teacher/classes", `/teacher/missions?id=${newMission.id}`);
+  return { success: true, missionId: newMission.id };
+}
+
 export async function saveStage1Question(formData: FormData) {
-  const access = await requireRole("teacher");
+  const access = await requireAnyRole(["teacher", "admin"]);
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
 
   const missionId = String(formData.get("missionId") ?? "");
@@ -62,7 +330,7 @@ export async function saveStage1Question(formData: FormData) {
 }
 
 export async function deleteStage1Question(formData: FormData) {
-  const access = await requireRole("teacher");
+  const access = await requireAnyRole(["teacher", "admin"]);
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
 
   const questionId = String(formData.get("questionId") ?? "");
@@ -76,7 +344,7 @@ export async function deleteStage1Question(formData: FormData) {
 }
 
 export async function saveStage2Product(formData: FormData) {
-  const access = await requireRole("teacher");
+  const access = await requireAnyRole(["teacher", "admin"]);
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
 
   const missionId = String(formData.get("missionId") ?? "");
@@ -183,7 +451,7 @@ export async function saveStage2Product(formData: FormData) {
 }
 
 export async function deleteStage2Product(formData: FormData) {
-  const access = await requireRole("teacher");
+  const access = await requireAnyRole(["teacher", "admin"]);
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
 
   const productId = String(formData.get("productId") ?? "");
@@ -197,7 +465,7 @@ export async function deleteStage2Product(formData: FormData) {
 }
 
 export async function saveStage3Reading(formData: FormData) {
-  const access = await requireRole("teacher");
+  const access = await requireAnyRole(["teacher", "admin"]);
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
 
   const missionId = String(formData.get("missionId") ?? "");
@@ -236,7 +504,7 @@ export async function saveStage3Reading(formData: FormData) {
 }
 
 export async function saveStage4Math(formData: FormData) {
-  const access = await requireRole("teacher");
+  const access = await requireAnyRole(["teacher", "admin"]);
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
 
   const missionId = String(formData.get("missionId") ?? "");
@@ -293,7 +561,7 @@ export async function saveStage4Math(formData: FormData) {
 }
 
 export async function deleteStage4Math(formData: FormData) {
-  const access = await requireRole("teacher");
+  const access = await requireAnyRole(["teacher", "admin"]);
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
 
   const questionId = String(formData.get("questionId") ?? "");
@@ -307,7 +575,7 @@ export async function deleteStage4Math(formData: FormData) {
 }
 
 export async function assignMissionToClass(formData: FormData) {
-  const access = await requireRole("teacher");
+  const access = await requireAnyRole(["teacher", "admin"]);
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
 
   const missionId = String(formData.get("missionId") ?? "");
@@ -344,7 +612,7 @@ export async function assignMissionToClass(formData: FormData) {
 }
 
 export async function uploadMissionAsset(formData: FormData) {
-  const access = await requireRole("teacher");
+  const access = await requireAnyRole(["teacher", "admin"]);
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
 
   const missionId = String(formData.get("missionId") ?? "");
@@ -392,7 +660,7 @@ export async function uploadMissionAsset(formData: FormData) {
 }
 
 export async function uploadOptionImage(formData: FormData) {
-  const access = await requireRole("teacher");
+  const access = await requireAnyRole(["teacher", "admin"]);
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
 
   const file = formData.get("file") as File | null;
@@ -433,7 +701,7 @@ export async function uploadOptionImage(formData: FormData) {
 }
 
 export async function resetClassroomLeaderboard(classId: string) {
-  const access = await requireRole("teacher");
+  const access = await requireAnyRole(["teacher", "admin"]);
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
   if (!classId) return { error: "Classroom ID is required." };
 
