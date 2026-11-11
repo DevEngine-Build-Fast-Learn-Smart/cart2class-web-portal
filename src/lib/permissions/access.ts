@@ -1,13 +1,18 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { roleHome } from "@/lib/constants/roles";
+import { roleHome, roleLoginUrls } from "@/lib/constants/roles";
 import type { Membership, Profile, Role } from "@/types/domain";
 
 export async function requireAnyRole(allowed: Role[]) {
   const supabase = await createClient();
   if (!supabase) return { unavailable: true as const, profile: null, memberships: [] as Membership[] };
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  if (!user) {
+    if (allowed.length === 1 && roleLoginUrls[allowed[0]]) {
+      redirect(roleLoginUrls[allowed[0]] as never);
+    }
+    redirect("/login");
+  }
   const [{ data: profile }, { data: memberships }] = await Promise.all([
     supabase.from("profiles").select("*").eq("id", user.id).single(),
     supabase.from("role_memberships").select("role,organization_id,is_active").eq("user_id", user.id).eq("is_active", true)

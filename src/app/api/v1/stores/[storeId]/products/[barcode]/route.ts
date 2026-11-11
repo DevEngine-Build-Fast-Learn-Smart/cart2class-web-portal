@@ -16,6 +16,23 @@ export async function GET(
       .eq("barcode", barcode)
       .limit(1);
 
+    // Record scan event in audit_logs for live usage counter telemetry
+    try {
+      await supabase.from("audit_logs").insert({
+        organization_id: "00000000-0000-0000-0000-000000000001",
+        actor_user_id: null,
+        action: "barcode.scanned",
+        entity_type: "product_barcode",
+        entity_id: barcode,
+        metadata: {
+          barcode,
+          store_id: storeId,
+          product_name: missionProd?.[0]?.name ?? barcode,
+          scanned_at: new Date().toISOString()
+        }
+      });
+    } catch (_) {}
+
     if (missionProd?.[0]) {
       const p = missionProd[0];
       return NextResponse.json({
@@ -64,4 +81,3 @@ export async function GET(
     return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });
   }
 }
-

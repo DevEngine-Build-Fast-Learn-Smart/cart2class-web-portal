@@ -97,6 +97,7 @@ export function PortalShell({
           </div>
 
           <form action={logout}>
+            <input type="hidden" name="role" value={role} />
             <Button
               type="submit"
               variant="ghost"
@@ -142,6 +143,7 @@ export function PortalShell({
 
             <div className="mt-auto border-t border-white/10 pt-4">
               <form action={logout}>
+                <input type="hidden" name="role" value={role} />
                 <Button
                   type="submit"
                   variant="ghost"

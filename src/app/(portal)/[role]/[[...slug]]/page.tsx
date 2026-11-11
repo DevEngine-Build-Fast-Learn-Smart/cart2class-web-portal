@@ -1,6 +1,8 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { roles, type Role } from "@/types/domain";
 import { requireRole } from "@/lib/permissions/access";
+import { createClient } from "@/lib/supabase/server";
+import { RoleLoginView } from "@/features/authentication/role-login-view";
 import { PortalShell } from "@/components/layout/portal-shell";
 import { DashboardView } from "@/features/dashboard/dashboard-view";
 import { getDashboardData } from "@/features/dashboard/service";
@@ -35,6 +37,24 @@ export default async function PortalPage({
   const requestedMissionId = typeof query.id === "string" ? query.id : undefined;
   if (!roles.includes(inputRole as Role)) notFound();
   const role = inputRole as Role;
+
+  const client = await createClient();
+  if (client) {
+    const {
+      data: { user }
+    } = await client.auth.getUser();
+
+    if (!user) {
+      if (role === "admin") {
+        redirect("/super-admin");
+      }
+      if (slug.length === 0) {
+        return <RoleLoginView role={role} />;
+      }
+      redirect(`/${role}` as never);
+    }
+  }
+
   const access = await requireRole(role);
 
   if (access.unavailable || !access.profile || !access.supabase) {
@@ -66,7 +86,13 @@ export default async function PortalPage({
       { data: missions },
       { data: students },
       { data: classes },
-      { data: stores }
+      { data: stores },
+      { data: sessions },
+      { data: checkins },
+      { data: attempts },
+      { data: assignments },
+      { data: runs },
+      { data: auditLogs }
     ] = await Promise.all([
       supabase
         .from("products")
@@ -87,16 +113,119 @@ export default async function PortalPage({
         .select("id,first_name,last_initial,grade_level,class_id,is_active")
         .order("first_name"),
       supabase.from("classes").select("id,name"),
-      supabase.from("stores").select("id,name,is_active").order("name")
+      supabase.from("stores").select("id,name,is_active").order("name"),
+      supabase.from("student_device_sessions").select("student_id,created_at"),
+      supabase.from("store_checkin_events").select("store_id,occurred_at"),
+      supabase.from("mission_attempts").select("id,assignment_id,started_at,status"),
+      supabase.from("mission_assignments").select("id,mission_id"),
+      supabase.from("mission_runs").select("mission_id,products_scanned,updated_at"),
+      supabase
+        .from("audit_logs")
+        .select("action,entity_id,metadata,created_at")
+        .in("action", ["barcode.scanned", "student.login", "student.mission_activity", "student.mission_completed"])
     ]);
 
     const classNameById = new Map((classes ?? []).map((c) => [c.id, c.name]));
     const missionTitleById = new Map((missions ?? []).map((m) => [m.id, m.title]));
+    const missionIdByAssignment = new Map((assignments ?? []).map((a) => [a.id, a.mission_id]));
 
-    // Merge and deduplicate product barcodes
+    // 1. Student QR Card usage map (logins)
+    const studentUsageMap = new Map<string, { count: number; lastUsedAt: string | null }>();
+    for (const sess of sessions ?? []) {
+      if (sess.student_id) {
+        const prev = studentUsageMap.get(sess.student_id) ?? { count: 0, lastUsedAt: null };
+        studentUsageMap.set(sess.student_id, {
+          count: prev.count + 1,
+          lastUsedAt: prev.lastUsedAt || sess.created_at || null
+        });
+      }
+    }
+    for (const log of auditLogs ?? []) {
+      if (log.action === "student.login" && log.entity_id) {
+        const prev = studentUsageMap.get(log.entity_id) ?? { count: 0, lastUsedAt: null };
+        studentUsageMap.set(log.entity_id, {
+          count: prev.count + 1,
+          lastUsedAt: prev.lastUsedAt || log.created_at || null
+        });
+      }
+    }
+
+    // 2. Store Check-in QR usage map
+    const storeUsageMap = new Map<string, { count: number; lastUsedAt: string | null }>();
+    for (const chk of checkins ?? []) {
+      if (chk.store_id) {
+        const prev = storeUsageMap.get(chk.store_id) ?? { count: 0, lastUsedAt: null };
+        storeUsageMap.set(chk.store_id, {
+          count: prev.count + 1,
+          lastUsedAt: prev.lastUsedAt || chk.occurred_at || null
+        });
+      }
+    }
+
+    // 3. Mission QR usage map (launches / attempts)
+    const missionUsageMap = new Map<string, { count: number; lastUsedAt: string | null }>();
+    for (const att of attempts ?? []) {
+      const mid = att.assignment_id ? missionIdByAssignment.get(att.assignment_id) : null;
+      if (mid) {
+        const prev = missionUsageMap.get(mid) ?? { count: 0, lastUsedAt: null };
+        missionUsageMap.set(mid, {
+          count: prev.count + 1,
+          lastUsedAt: prev.lastUsedAt || att.started_at || null
+        });
+      }
+    }
+    for (const run of runs ?? []) {
+      if (run.mission_id) {
+        const prev = missionUsageMap.get(run.mission_id) ?? { count: 0, lastUsedAt: null };
+        missionUsageMap.set(run.mission_id, {
+          count: prev.count + 1,
+          lastUsedAt: prev.lastUsedAt || run.updated_at || null
+        });
+      }
+    }
+    for (const log of auditLogs ?? []) {
+      if ((log.action === "student.mission_activity" || log.action === "student.mission_completed") && log.entity_id) {
+        const prev = missionUsageMap.get(log.entity_id) ?? { count: 0, lastUsedAt: null };
+        missionUsageMap.set(log.entity_id, {
+          count: prev.count + 1,
+          lastUsedAt: prev.lastUsedAt || log.created_at || null
+        });
+      }
+    }
+
+    // 4. Product Barcode usage map (aisle camera scans)
+    const barcodeUsageMap = new Map<string, { count: number; lastUsedAt: string | null }>();
+    for (const log of auditLogs ?? []) {
+      if (log.action === "barcode.scanned") {
+        const b = log.entity_id || (log.metadata as any)?.barcode;
+        if (b) {
+          const prev = barcodeUsageMap.get(b) ?? { count: 0, lastUsedAt: null };
+          barcodeUsageMap.set(b, {
+            count: prev.count + 1,
+            lastUsedAt: prev.lastUsedAt || log.created_at || null
+          });
+        }
+      }
+    }
+    for (const run of runs ?? []) {
+      if (Array.isArray(run.products_scanned)) {
+        for (const scanned of run.products_scanned) {
+          if (scanned && typeof scanned === "string") {
+            const prev = barcodeUsageMap.get(scanned) ?? { count: 0, lastUsedAt: null };
+            barcodeUsageMap.set(scanned, {
+              count: prev.count + 1,
+              lastUsedAt: prev.lastUsedAt || run.updated_at || null
+            });
+          }
+        }
+      }
+    }
+
+    // Merge and deduplicate product barcodes with real usage metrics
     const barcodeMap = new Map<string, any>();
     for (const p of products ?? []) {
       if (p.barcode) {
+        const usage = barcodeUsageMap.get(p.barcode) || barcodeUsageMap.get(p.id) || { count: 0, lastUsedAt: null };
         barcodeMap.set(p.barcode, {
           id: p.id,
           name: p.name,
@@ -104,13 +233,16 @@ export default async function PortalPage({
           price: p.price,
           package_size: p.weight_text,
           category: p.category || "Produce",
-          mission_product_id: null
+          mission_product_id: null,
+          usage_count: usage.count,
+          last_used_at: usage.lastUsedAt
         });
       }
     }
     for (const mp of missionProducts ?? []) {
       if (mp.barcode) {
         const prev = barcodeMap.get(mp.barcode);
+        const usage = barcodeUsageMap.get(mp.barcode) || barcodeUsageMap.get(mp.id) || { count: 0, lastUsedAt: null };
         barcodeMap.set(mp.barcode, {
           id: prev?.id || mp.id,
           name: mp.name,
@@ -120,7 +252,9 @@ export default async function PortalPage({
           category: prev?.category || "Mission Produce",
           mission_id: mp.mission_id,
           mission_title: missionTitleById.get(mp.mission_id) || "Assigned Mission",
-          mission_product_id: mp.id
+          mission_product_id: mp.id,
+          usage_count: Math.max(prev?.usage_count || 0, usage.count),
+          last_used_at: prev?.last_used_at || usage.lastUsedAt
         });
       }
     }
@@ -129,26 +263,41 @@ export default async function PortalPage({
       <QrBarcodeManagementView
         role={role as "admin" | "teacher" | "store"}
         products={Array.from(barcodeMap.values())}
-        missions={(missions ?? []).map((m) => ({
-          id: m.id,
-          title: m.title,
-          number: m.mission_number ?? 1,
-          version: m.current_version ?? 1,
-          status: m.status,
-          minutes: m.estimated_minutes ?? 12
-        }))}
-        students={(students ?? []).map((s) => ({
-          id: s.id,
-          name: `${s.first_name} ${s.last_initial ?? ""}`.trim(),
-          room: classNameById.get(s.class_id) ?? "Kindergarten",
-          grade: s.grade_level,
-          active: s.is_active
-        }))}
-        stores={(stores ?? []).map((st) => ({
-          id: st.id,
-          name: st.name,
-          active: st.is_active
-        }))}
+        missions={(missions ?? []).map((m) => {
+          const usage = missionUsageMap.get(m.id) || { count: 0, lastUsedAt: null };
+          return {
+            id: m.id,
+            title: m.title,
+            number: m.mission_number ?? 1,
+            version: m.current_version ?? 1,
+            status: m.status,
+            minutes: m.estimated_minutes ?? 12,
+            usage_count: usage.count,
+            last_used_at: usage.lastUsedAt
+          };
+        })}
+        students={(students ?? []).map((s) => {
+          const usage = studentUsageMap.get(s.id) || { count: 0, lastUsedAt: null };
+          return {
+            id: s.id,
+            name: `${s.first_name} ${s.last_initial ?? ""}`.trim(),
+            room: classNameById.get(s.class_id) ?? "Kindergarten",
+            grade: s.grade_level,
+            active: s.is_active,
+            usage_count: usage.count,
+            last_used_at: usage.lastUsedAt
+          };
+        })}
+        stores={(stores ?? []).map((st) => {
+          const usage = storeUsageMap.get(st.id) || { count: 0, lastUsedAt: null };
+          return {
+            id: st.id,
+            name: st.name,
+            active: st.is_active,
+            usage_count: usage.count,
+            last_used_at: usage.lastUsedAt
+          };
+        })}
       />
     );
   } else if (role === "admin") {

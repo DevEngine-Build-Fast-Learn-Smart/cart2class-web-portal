@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireRole } from "@/lib/permissions/access";
 
 export async function createQuickProductBarcode(formData: FormData) {
   const adminClient = createAdminClient();
@@ -182,5 +181,79 @@ export async function deleteProductBarcode(formData: FormData) {
     return { success: true };
   } catch (err: any) {
     return { error: err.message || "Failed to delete barcode." };
+  }
+}
+
+export async function recordCodeScanAction(formData: FormData) {
+  const adminClient = createAdminClient();
+  const codeType = String(formData.get("codeType") ?? "").trim();
+  const codeId = String(formData.get("codeId") ?? "").trim();
+  const codeLabel = String(formData.get("codeLabel") ?? "").trim();
+
+  if (!codeType || !codeId) {
+    return { error: "Missing code parameters." };
+  }
+
+  try {
+    if (codeType === "product") {
+      await adminClient.from("audit_logs").insert({
+        organization_id: "00000000-0000-0000-0000-000000000001",
+        actor_user_id: null,
+        action: "barcode.scanned",
+        entity_type: "product_barcode",
+        entity_id: codeId,
+        metadata: {
+          barcode: codeId,
+          product_name: codeLabel,
+          source: "portal_action_scan",
+          scanned_at: new Date().toISOString()
+        }
+      });
+    } else if (codeType === "student") {
+      await adminClient.from("audit_logs").insert({
+        organization_id: "00000000-0000-0000-0000-000000000001",
+        actor_user_id: null,
+        action: "student.login",
+        entity_type: "student",
+        entity_id: codeId,
+        metadata: {
+          student_id: codeId,
+          student_name: codeLabel,
+          method: "qr_card_scan",
+          login_time: new Date().toISOString()
+        }
+      });
+    } else if (codeType === "store") {
+      const { data: defaultCls } = await adminClient.from("classes").select("id").limit(1).maybeSingle();
+      const { data: defaultCode } = await adminClient.from("store_checkin_codes").select("id").eq("store_id", codeId).limit(1).maybeSingle();
+
+      await adminClient.from("store_checkin_events").insert({
+        store_id: codeId,
+        class_id: defaultCls?.id || "00000000-0000-0000-0000-000000000031",
+        checkin_code_id: defaultCode?.id || null
+      });
+    } else if (codeType === "mission") {
+      await adminClient.from("audit_logs").insert({
+        organization_id: "00000000-0000-0000-0000-000000000001",
+        actor_user_id: null,
+        action: "student.mission_activity",
+        entity_type: "mission",
+        entity_id: codeId,
+        metadata: {
+          mission_id: codeId,
+          mission_title: codeLabel,
+          event: "mission_qr_launch",
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+
+    revalidatePath("/admin/barcodes");
+    revalidatePath("/teacher/barcodes");
+    revalidatePath("/store/barcodes");
+
+    return { success: true };
+  } catch (err: any) {
+    return { error: err.message || "Failed to record scan." };
   }
 }
