@@ -6,6 +6,42 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import crypto from "crypto";
 
 const refresh = (...paths: string[]) => paths.forEach((path) => revalidatePath(path));
+const MISSION_ASSET_BUCKET = "mission-assets";
+const MAX_MISSION_ASSET_BYTES = 10 * 1024 * 1024;
+
+function isSupportedMissionAsset(file: File) {
+  return file.type.startsWith("image/") || file.type.startsWith("audio/");
+}
+
+function storagePathFromAsset(asset: { storage_path?: string | null; cdn_url?: string | null }) {
+  if (asset.storage_path) return asset.storage_path;
+  const marker = `/storage/v1/object/public/${MISSION_ASSET_BUCKET}/`;
+  const url = asset.cdn_url ?? "";
+  const markerIndex = url.indexOf(marker);
+  return markerIndex === -1 ? null : decodeURIComponent(url.slice(markerIndex + marker.length).split("?")[0]);
+}
+
+async function registerMissionAsset(
+  adminClient: ReturnType<typeof createAdminClient>,
+  values: Record<string, unknown>
+) {
+  const durableValues = {
+    ...values,
+    storage_bucket: MISSION_ASSET_BUCKET,
+    storage_path: values.storage_path
+  };
+  const result = await adminClient.from("mission_assets").insert(durableValues).select("id").single();
+
+  // The production schema may be one deployment behind this application. Keep
+  // uploads safe during that short window; the public URL can still be parsed
+  // on deletion, and the migration will add the durable path fields later.
+  if (result.error?.code === "PGRST204" || /storage_(bucket|path)/i.test(result.error?.message ?? "")) {
+    const { storage_bucket: _storageBucket, storage_path: _storagePath, ...legacyValues } = durableValues;
+    return adminClient.from("mission_assets").insert(legacyValues).select("id").single();
+  }
+
+  return result;
+}
 
 export async function createNewMission(formData: FormData) {
   const access = await requireAnyRole(["teacher", "admin"]);
@@ -87,9 +123,10 @@ export async function createNewMission(formData: FormData) {
   let initialSharingStatus: string = "draft";
 
   if (!isTeacher) {
-    // Admin directly creating can publish immediately or draft
-    initialStatus = "published";
-    initialSharingStatus = "approved";
+    // Administrators build in a private draft too, but can publish themselves
+    // when the mission is ready. This avoids a nonsensical self-review step.
+    initialStatus = "draft";
+    initialSharingStatus = "private";
   } else {
     // Teacher creating: must be reviewed by admin before publishing
     initialStatus = "draft";
@@ -639,7 +676,10 @@ export async function uploadMissionAsset(formData: FormData) {
   const stageKey = String(formData.get("stageKey") ?? "general");
   const file = formData.get("file") as File | null;
 
-  if (!file) return { error: "No file provided" };
+  if (!missionId) return { error: "Select a mission before uploading media." };
+  if (!file || file.size === 0) return { error: "No file provided." };
+  if (file.size > MAX_MISSION_ASSET_BYTES) return { error: "Media files must be 10MB or smaller." };
+  if (!isSupportedMissionAsset(file)) return { error: "Upload an image or audio file only." };
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
@@ -649,8 +689,8 @@ export async function uploadMissionAsset(formData: FormData) {
   const adminClient = createAdminClient();
 
   // Upload to Supabase storage bucket mission-assets
-  const { data: uploadRes, error: uploadErr } = await adminClient.storage
-    .from("mission-assets")
+  const { error: uploadErr } = await adminClient.storage
+    .from(MISSION_ASSET_BUCKET)
     .upload(storagePath, buffer, {
       contentType: file.type,
       upsert: true
@@ -660,23 +700,31 @@ export async function uploadMissionAsset(formData: FormData) {
     return { error: uploadErr.message };
   }
 
-  const { data: pubUrl } = adminClient.storage.from("mission-assets").getPublicUrl(storagePath);
+  const { data: pubUrl } = adminClient.storage.from(MISSION_ASSET_BUCKET).getPublicUrl(storagePath);
   const cdnUrl = pubUrl.publicUrl;
 
-  // Insert into mission_assets table
-  await adminClient.from("mission_assets").insert({
+  // The metadata row is the Media Library source of truth. If it cannot be
+  // saved, remove the new object so there is never an invisible/orphan upload.
+  const { data: asset, error: assetError } = await registerMissionAsset(adminClient, {
     mission_id: missionId || null,
     stage_key: stageKey,
     asset_path: `assets/${file.type.startsWith("image") ? "images" : "audio"}/${file.name}`,
     cdn_url: cdnUrl,
+    storage_bucket: MISSION_ASSET_BUCKET,
+    storage_path: storagePath,
     sha256_hash: sha256,
     size_bytes: file.size,
     content_type: file.type,
     file_name: file.name
   });
 
+  if (assetError || !asset) {
+    await adminClient.storage.from(MISSION_ASSET_BUCKET).remove([storagePath]);
+    return { error: "The file could not be registered in the Media Library. Nothing was saved; please try again." };
+  }
+
   refresh("/teacher/missions", `/teacher/missions/${missionId}`);
-  return { success: true, url: cdnUrl, sha256 };
+  return { success: true, assetId: asset.id, url: cdnUrl, sha256 };
 }
 
 export async function uploadOptionImage(formData: FormData) {
@@ -686,7 +734,9 @@ export async function uploadOptionImage(formData: FormData) {
   const file = formData.get("file") as File | null;
   const missionId = String(formData.get("missionId") ?? "general");
 
-  if (!file || file.size === 0) return { error: "No file provided" };
+  if (!file || file.size === 0) return { error: "No file provided." };
+  if (file.size > MAX_MISSION_ASSET_BYTES) return { error: "Pictures must be 10MB or smaller." };
+  if (!file.type.startsWith("image/")) return { error: "Upload an image file only." };
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
@@ -695,7 +745,7 @@ export async function uploadOptionImage(formData: FormData) {
 
   const adminClient = createAdminClient();
   const { error: uploadErr } = await adminClient.storage
-    .from("mission-assets")
+    .from(MISSION_ASSET_BUCKET)
     .upload(storagePath, buffer, {
       contentType: file.type,
       upsert: true
@@ -703,21 +753,73 @@ export async function uploadOptionImage(formData: FormData) {
 
   if (uploadErr) return { error: uploadErr.message };
 
-  const { data: pubUrl } = adminClient.storage.from("mission-assets").getPublicUrl(storagePath);
+  const { data: pubUrl } = adminClient.storage.from(MISSION_ASSET_BUCKET).getPublicUrl(storagePath);
   const cdnUrl = pubUrl.publicUrl;
 
-  await adminClient.from("mission_assets").insert({
+  const { error: assetError } = await registerMissionAsset(adminClient, {
     mission_id: missionId === "general" ? null : missionId,
     stage_key: "options",
     asset_path: cdnUrl,
     cdn_url: cdnUrl,
+    storage_bucket: MISSION_ASSET_BUCKET,
+    storage_path: storagePath,
     sha256_hash: sha256,
     size_bytes: file.size,
     content_type: file.type,
     file_name: file.name
   });
 
+  if (assetError) {
+    await adminClient.storage.from(MISSION_ASSET_BUCKET).remove([storagePath]);
+    return { error: "The picture could not be registered in the Media Library. Nothing was saved; please try again." };
+  }
+
   return { success: true, url: cdnUrl };
+}
+
+export async function deleteMissionAsset(formData: FormData) {
+  const access = await requireAnyRole(["teacher", "admin"]);
+  if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
+
+  const missionId = String(formData.get("missionId") ?? "").trim();
+  const assetId = String(formData.get("assetId") ?? "").trim();
+  if (!missionId || !assetId) return { error: "Asset and mission are required." };
+
+  const adminClient = createAdminClient();
+  const assetResult = await adminClient
+    .from("mission_assets")
+    .select("id,mission_id,storage_bucket,storage_path,cdn_url")
+    .eq("id", assetId)
+    .eq("mission_id", missionId)
+    .maybeSingle();
+  let asset: { id: string; mission_id: string; storage_bucket?: string | null; storage_path?: string | null; cdn_url?: string | null } | null = assetResult.data;
+  let readError = assetResult.error;
+
+  if (readError?.code === "PGRST204" || /storage_(bucket|path)/i.test(readError?.message ?? "")) {
+    const legacyResult = await adminClient
+      .from("mission_assets")
+      .select("id,mission_id,cdn_url")
+      .eq("id", assetId)
+      .eq("mission_id", missionId)
+      .maybeSingle();
+    asset = legacyResult.data;
+    readError = legacyResult.error;
+  }
+
+  if (readError || !asset) return { error: "This media asset is no longer available." };
+
+  const bucket = asset.storage_bucket || MISSION_ASSET_BUCKET;
+  const storagePath = storagePathFromAsset(asset);
+  if (storagePath) {
+    const { error: removeError } = await adminClient.storage.from(bucket).remove([storagePath]);
+    if (removeError) return { error: "The file could not be removed from secure storage. The library record was kept." };
+  }
+
+  const { error: deleteError } = await adminClient.from("mission_assets").delete().eq("id", assetId).eq("mission_id", missionId);
+  if (deleteError) return { error: "The file was removed, but its Media Library record could not be updated. Please refresh and contact an administrator if it remains listed." };
+
+  refresh("/teacher/missions", `/teacher/missions/${missionId}`, "/admin/missions");
+  return { success: true };
 }
 
 export async function resetClassroomLeaderboard(classId: string) {

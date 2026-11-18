@@ -76,14 +76,14 @@ export function SidebarNavigation({
             href={href}
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
-            className={`group flex min-h-11 items-center gap-3 rounded-2xl px-3.5 text-sm font-bold transition-colors duration-150 ${
+            className={`group flex min-h-10 items-center gap-2.5 rounded-xl px-3 text-sm font-bold transition-colors duration-150 ${
               active
                 ? "bg-white text-navy shadow-[0_10px_25px_rgba(0,0,0,0.22)]"
                 : "text-slate-300 hover:bg-white/10 hover:text-white"
             }`}
           >
             <span
-              className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl transition-colors ${
+              className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg transition-colors ${
                 active
                   ? "bg-cyan-100 text-cyan-800"
                   : "text-slate-400 group-hover:bg-white/10 group-hover:text-cyan-300"

@@ -30,6 +30,26 @@ export async function savePolicyVersion(formData: FormData) {
   revalidatePath("/admin/legal");
 }
 
+export async function updatePolicyVersion(formData: FormData) {
+  const access = await requireRole("admin");
+  if (access.unavailable || !access.supabase) return;
+
+  const versionId = String(formData.get("versionId") ?? "");
+  const title = String(formData.get("title") ?? "").trim();
+  const content = String(formData.get("content") ?? "").trim();
+  if (!versionId || !title || !content) return;
+
+  // Published policies remain immutable. Administrators make a new draft from
+  // the published content, then publish that reviewed revision when ready.
+  await access.supabase
+    .from("policy_versions")
+    .update({ title, content_markdown: content })
+    .eq("id", versionId)
+    .eq("status", "draft");
+
+  revalidatePath("/admin/legal");
+}
+
 export async function publishPolicyVersion(formData: FormData) {
   const access = await requireRole("admin");
   if (access.unavailable || !access.supabase) return;

@@ -129,7 +129,7 @@ export async function AdminSectionView({ slug, supabase }: { slug: string; supab
           <section className="panel p-5">
             <h2 className="font-extrabold">Educational product barcodes ({combinedProducts.length})</h2>
             <p className="mt-1 text-sm text-muted">Print scannable Code128 labels for approved demo, store, and educational product activities.</p>
-            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {combinedProducts.map((product) => (
                 <BarcodeExportButton
                   key={product.barcode}
@@ -137,6 +137,7 @@ export async function AdminSectionView({ slug, supabase }: { slug: string; supab
                   label={product.name}
                   subtitle={`${product.category ?? "Educational product"} · ${product.barcode_symbology}`}
                   symbology={product.barcode_symbology as "CODE128" | "EAN13" | "UPC"}
+                  compact
                 />
               ))}
             </div>

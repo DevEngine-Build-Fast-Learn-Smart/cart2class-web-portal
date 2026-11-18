@@ -30,11 +30,12 @@ import {
   Send,
   Loader2,
   CheckCheck,
-  Calendar
+  Calendar,
+  Trash2
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { toggleMissionStatus, cloneMission } from "./mission-library-actions";
+import { deleteMission, toggleMissionStatus } from "./mission-library-actions";
 import { submitMission } from "@/features/dashboard/workflow-actions";
 import { CreateMissionModal } from "./create-mission-modal";
 import { ManageStudentAccessModal } from "./manage-student-access-modal";
@@ -74,6 +75,8 @@ export function MissionLibraryView({
   const [isToggling, setIsToggling] = useState<string | null>(null);
   const [isCloning, setIsCloning] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<string | null>(null);
+  const [missionPendingDeletion, setMissionPendingDeletion] = useState<Row | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -162,6 +165,47 @@ export function MissionLibraryView({
         <div className="fixed top-6 right-6 z-50 flex items-center gap-2 rounded-xl bg-teal-600 px-5 py-3 text-sm font-bold text-white shadow-xl animate-in fade-in duration-200">
           <CheckCircle2 className="h-5 w-5 text-teal-200" />
           <span>{notification}</span>
+        </div>
+      )}
+
+      {missionPendingDeletion && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border bg-white p-6 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-rose-50 text-rose-700">
+                <AlertCircle className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-black text-navy">Delete mission permanently?</h2>
+                <p className="mt-1 text-xs leading-5 text-muted">This removes <strong className="text-ink">{missionPendingDeletion.title}</strong>, its assignments, student attempts, QR credentials, media-library records, and stored mission assets. This cannot be undone.</p>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-2 border-t pt-4">
+              <Button type="button" variant="secondary" disabled={isDeleting} onClick={() => setMissionPendingDeletion(null)} className="h-9 px-4 text-xs font-bold">Cancel</Button>
+              <Button
+                type="button"
+                disabled={isDeleting}
+                onClick={async () => {
+                  setIsDeleting(true);
+                  const formData = new FormData();
+                  formData.append("missionId", missionPendingDeletion.id);
+                  const result = await deleteMission(formData);
+                  setIsDeleting(false);
+                  if ("error" in result) {
+              showToast(`Could not delete mission: ${result.error || "Unknown error"}`);
+                    return;
+                  }
+                  setMissionPendingDeletion(null);
+                  showToast(`Deleted mission “${missionPendingDeletion.title}”.`);
+                  router.refresh();
+                }}
+                className="h-9 bg-rose-600 px-4 text-xs font-bold text-white hover:bg-rose-700"
+              >
+                {isDeleting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-1.5 h-3.5 w-3.5" />}
+                Delete mission
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -504,7 +548,7 @@ export function MissionLibraryView({
                     </Button>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div className={`grid gap-2 pt-1 ${role === "admin" ? "grid-cols-3" : "grid-cols-2"}`}>
                     {/* Role-Specific Primary Workflow Action */}
                     {role === "teacher" && !isPublished ? (
                       isSubmitted ? (
@@ -578,6 +622,16 @@ export function MissionLibraryView({
                     >
                       <Trophy className="mr-1.5 h-3.5 w-3.5 text-amber-600" /> Results ({metrics.participants.length})
                     </Button>
+                    {role === "admin" && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setMissionPendingDeletion(m)}
+                        className="h-9 border-rose-200 bg-rose-50 text-xs font-bold text-rose-700 hover:bg-rose-100"
+                      >
+                        <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
+                      </Button>
+                    )}
                   </div>
                 </div>
               </article>

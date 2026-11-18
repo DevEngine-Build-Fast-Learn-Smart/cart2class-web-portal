@@ -159,7 +159,7 @@ export function PortalShell({
       )}
 
       {/* 3. MAIN WORKSPACE CONTENT AREA WITH FLOATING PILL HEADER */}
-      <div className="min-w-0 flex flex-col">
+      <div className="min-w-0 flex flex-col overflow-x-clip">
         {/* Modern Floating Capsule Header (DevEngine Style) */}
         <header className="sticky top-3 z-30 mx-3 sm:mx-6 lg:mx-8 my-3 rounded-full bg-white/95 backdrop-blur-md border border-slate-200/90 shadow-[0_10px_35px_rgba(0,0,0,0.06)] px-3.5 sm:px-5 py-2 flex items-center justify-between gap-3">
           {/* Mobile hamburger button */}
@@ -190,7 +190,7 @@ export function PortalShell({
         </header>
 
         {/* Content View */}
-        <div className="flex-1">{children}</div>
+        <div className="min-w-0 flex-1">{children}</div>
       </div>
     </div>
   );

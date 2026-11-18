@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { QrExportButton, BulkQrSheetButton, InstantQrPreview } from "@/components/shared/code-export";
+import { QrExportButton, BulkQrSheetButton } from "@/components/shared/code-export";
 import { ToastAlert, ConfirmDeleteModal } from "@/components/ui/dialog-alert";
 import { ImageUploadField } from "@/components/shared/image-upload-field";
 import { EntityAvatar } from "@/components/shared/entity-avatar";
@@ -187,6 +187,7 @@ export function AdminManagementView({
   const [showCreateStore, setShowCreateStore] = useState(false);
 
   const [selectedRole, setSelectedRole] = useState<string>("teacher");
+  const [selectedTeacherSchoolId, setSelectedTeacherSchoolId] = useState<string>("");
   const [editingUser, setEditingUser] = useState<Row | null>(null);
   const [editingStudent, setEditingStudent] = useState<Row | null>(null);
   const [editingSchool, setEditingSchool] = useState<Row | null>(null);
@@ -216,6 +217,9 @@ export function AdminManagementView({
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   const parentProfiles = profiles.filter((p) => p.role === "parent");
+  const teacherClassOptions = selectedTeacherSchoolId
+    ? classes.filter((classroom) => classroom.school_id === selectedTeacherSchoolId)
+    : classes;
 
   const showToast = (message: string, type: "success" | "error" = "success", title?: string) => {
     setToast({ type, message, title });
@@ -356,15 +360,32 @@ export function AdminManagementView({
               </label>
 
               {selectedRole === "teacher" && (
-                <label className="text-xs font-bold">
-                  Classroom Assignment
-                  <select name="classId" className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal">
-                    <option value="">Select classroom...</option>
-                    {classes.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name} (Grade {c.grade_level})</option>
-                    ))}
-                  </select>
-                </label>
+                <>
+                  <label className="text-xs font-bold">
+                    Partner School
+                    <select
+                      required
+                      name="schoolId"
+                      value={selectedTeacherSchoolId}
+                      onChange={(event) => setSelectedTeacherSchoolId(event.target.value)}
+                      className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
+                    >
+                      <option value="">Select school...</option>
+                      {schools.filter((school) => school.is_active).map((school) => (
+                        <option key={school.id} value={school.id}>{school.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs font-bold">
+                    Classroom Assignment
+                    <select required name="classId" className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal">
+                      <option value="">{selectedTeacherSchoolId ? "Select classroom..." : "Select a school first..."}</option>
+                      {teacherClassOptions.filter((classroom) => classroom.is_active).map((classroom) => (
+                        <option key={classroom.id} value={classroom.id}>{classroom.name} (Grade {classroom.grade_level})</option>
+                      ))}
+                    </select>
+                  </label>
+                </>
               )}
 
               {selectedRole === "store" && (
@@ -442,6 +463,15 @@ export function AdminManagementView({
                   <option value="">Select classroom...</option>
                   {classes.map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs font-bold">
+                Parent / Guardian <span className="font-normal text-muted">(optional)</span>
+                <select name="parentUserId" className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal">
+                  <option value="">Link later</option>
+                  {parentProfiles.filter((parent) => parent.account_status === "active").map((parent) => (
+                    <option key={parent.id} value={parent.id}>{parent.display_name}</option>
                   ))}
                 </select>
               </label>
@@ -566,6 +596,7 @@ export function AdminManagementView({
                   <tr>
                     <th className="px-5 py-3.5">Account Name</th>
                     <th className="px-5 py-3.5">Role</th>
+                    <th className="px-5 py-3.5">Assignment</th>
                     <th className="px-5 py-3.5">Status</th>
                     <th className="px-5 py-3.5 text-right">Actions</th>
                   </tr>
@@ -583,6 +614,9 @@ export function AdminManagementView({
                         <Badge tone={p.role === "admin" ? "purple" : p.role === "teacher" ? "blue" : p.role === "store" ? "amber" : "teal"}>
                           {p.role}
                         </Badge>
+                      </td>
+                      <td className="px-5 py-3.5 text-xs font-medium text-muted">
+                        {p.assignment_label}
                       </td>
                       <td className="px-5 py-3.5">
                         <Badge tone={p.account_status === "active" ? "green" : "slate"}>
@@ -694,32 +728,37 @@ export function AdminManagementView({
                         )}
                       </td>
                       <td className="px-5 py-3.5">
-                        {st.linked_parent_name ? (
-                          <div className="inline-flex items-center gap-2">
-                            <span className="inline-flex items-center gap-1 font-bold text-teal-800 bg-teal-50 px-3 py-1 rounded-full text-xs border border-teal-200">
-                              <Link2 className="h-3.5 w-3.5 text-teal-600" /> {st.linked_parent_name}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setDeleteConfirmation({
-                                  isOpen: true,
-                                  title: "Unlink Parent Guardian",
-                                  targetLabel: `${st.linked_parent_name} from ${st.first_name}`,
-                                  message: `Are you sure you want to unlink ${st.linked_parent_name} from ${st.first_name}? They will no longer have access to this learner's recordings.`,
-                                  onConfirm: async () => {
-                                    const fd = new FormData();
-                                    fd.append("studentId", st.id);
-                                    fd.append("parentUserId", st.linked_parent_id);
-                                    await unlinkStudentFromParent(fd);
-                                    showToast("Parent unlinked from learner.", "success", "Guardian Unlinked");
-                                  }
-                                });
-                              }}
-                              title="Unlink parent"
-                              className="text-rose-500 hover:text-rose-700 p-1"
-                            >
-                              <Unlink className="h-3.5 w-3.5" />
+                        {(st.linked_parents ?? []).length ? (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {st.linked_parents.map((parent: { parentId: string; parentName: string }) => (
+                              <span key={parent.parentId} className="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-bold text-teal-800">
+                                <Link2 className="h-3.5 w-3.5 text-teal-600" /> {parent.parentName}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDeleteConfirmation({
+                                      isOpen: true,
+                                      title: "Unlink Parent Guardian",
+                                      targetLabel: `${parent.parentName} from ${st.first_name}`,
+                                      message: `Are you sure you want to unlink ${parent.parentName} from ${st.first_name}? They will no longer have access to this learner's recordings.`,
+                                      onConfirm: async () => {
+                                        const fd = new FormData();
+                                        fd.append("studentId", st.id);
+                                        fd.append("parentUserId", parent.parentId);
+                                        const result = await unlinkStudentFromParent(fd);
+                                        showToast(result?.error || "Parent unlinked from learner.", result?.error ? "error" : "success", result?.error ? "Update Failed" : "Guardian Unlinked");
+                                      }
+                                    });
+                                  }}
+                                  title={`Unlink ${parent.parentName}`}
+                                  className="ml-0.5 text-teal-700 hover:text-rose-700"
+                                >
+                                  <Unlink className="h-3.5 w-3.5" />
+                                </button>
+                              </span>
+                            ))}
+                            <button onClick={() => setLinkingStudent(st)} className="text-xs font-bold text-brand hover:underline">
+                              + Add
                             </button>
                           </div>
                         ) : (
@@ -774,6 +813,61 @@ export function AdminManagementView({
           </div>
         </section>
 
+        {/* Parent / guardian relationship modal */}
+        {linkingStudent && (
+          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-navy/70 p-4 backdrop-blur-sm sm:items-center sm:p-6">
+            <div className="my-auto w-full max-w-md rounded-2xl border bg-white p-6 shadow-2xl">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div>
+                  <h3 className="text-lg font-black text-navy">Link parent or guardian</h3>
+                  <p className="mt-1 text-xs text-muted">Give a verified parent account access to {linkingStudent.first_name}&apos;s learner record.</p>
+                </div>
+                <button type="button" onClick={() => setLinkingStudent(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <form
+                className="mt-5 space-y-4 text-xs font-bold"
+                action={async (fd) => {
+                  const result = await linkStudentToParent(fd);
+                  if ("error" in result) {
+                    showToast(result.error, "error", "Could Not Link Guardian");
+                    return;
+                  }
+                  setLinkingStudent(null);
+                  showToast("Parent access linked to this learner.", "success", "Guardian Linked");
+                }}
+              >
+                <input type="hidden" name="studentId" value={linkingStudent.id} />
+                <label className="block">
+                  Parent / guardian account
+                  <select required name="parentUserId" className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal">
+                    <option value="">Select a parent account...</option>
+                    {parentProfiles
+                      .filter((parent) => parent.account_status === "active" && !(linkingStudent.linked_parents ?? []).some((linked: { parentId: string }) => linked.parentId === parent.id))
+                      .map((parent) => (
+                        <option key={parent.id} value={parent.id}>{parent.display_name}</option>
+                      ))}
+                  </select>
+                </label>
+                <label className="block">
+                  Relationship
+                  <select name="relationshipLabel" defaultValue="Parent/Guardian" className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal">
+                    <option>Parent/Guardian</option>
+                    <option>Parent</option>
+                    <option>Guardian</option>
+                    <option>Caregiver</option>
+                  </select>
+                </label>
+                <div className="flex justify-end gap-2 border-t pt-4">
+                  <Button type="button" variant="secondary" onClick={() => setLinkingStudent(null)} className="h-9 px-4 text-xs font-bold">Cancel</Button>
+                  <Button type="submit" className="h-9 bg-navy px-4 text-xs font-bold text-white">Link account</Button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* Edit User Account Modal */}
         {editingUser && (
           <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-navy/70 p-4 sm:p-6 backdrop-blur-sm overflow-y-auto">
@@ -787,7 +881,7 @@ export function AdminManagementView({
               <form
                 action={async (fd) => {
                   const res = await updatePortalUser(fd);
-                  if (res?.error) showToast(res.error, "error", "Update Failed");
+                  if ("error" in res && res.error) showToast(res.error, "error", "Update Failed");
                   else {
                     setEditingUser(null);
                     showToast(`Updated account for ${editingUser.display_name}`, "success", "Account Updated");
@@ -796,6 +890,7 @@ export function AdminManagementView({
                 className="space-y-4 text-xs font-bold"
               >
                 <input type="hidden" name="userId" value={editingUser.id} />
+                <input type="hidden" name="role" value={editingUser.role} />
                 <label className="block">
                   Display Name
                   <input
@@ -817,6 +912,43 @@ export function AdminManagementView({
                     <option value="disabled">Disabled</option>
                   </select>
                 </label>
+                {editingUser.role === "teacher" && (
+                  <>
+                    <label className="block">
+                      Partner School
+                      <select required name="schoolId" defaultValue={editingUser.assigned_school_id || ""} className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal">
+                        <option value="">Select school...</option>
+                        {schools.filter((school) => school.is_active).map((school) => (
+                          <option key={school.id} value={school.id}>{school.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      Classroom assignment
+                      <select required name="classId" defaultValue={editingUser.assigned_class_id || ""} className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal">
+                        <option value="">Select classroom...</option>
+                        {classes.filter((classroom) => classroom.is_active).map((classroom) => (
+                          <option key={classroom.id} value={classroom.id}>{classroom.school_name} · {classroom.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <p className="-mt-2 text-[11px] font-normal text-muted">The classroom must belong to the selected school.</p>
+                  </>
+                )}
+                {editingUser.role === "store" && (
+                  <label className="block">
+                    Store branch
+                    <select required name="storeId" defaultValue={editingUser.assigned_store_id || ""} className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal">
+                      <option value="">Select store branch...</option>
+                      {stores.filter((store) => store.is_active).map((store) => (
+                        <option key={store.id} value={store.id}>{store.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {editingUser.role === "parent" && (
+                  <p className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-normal text-blue-900">Manage this account&apos;s child links from the learner roster above.</p>
+                )}
                 <label className="block">
                   Set New Password (optional)
                   <input
@@ -860,7 +992,7 @@ export function AdminManagementView({
               <form
                 action={async (fd) => {
                   const res = await updateAdminStudent(fd);
-                  if (res?.error) showToast(res.error, "error", "Update Failed");
+                  if ("error" in res && res.error) showToast(res.error, "error", "Update Failed");
                   else {
                     setEditingStudent(null);
                     showToast(`Updated student profile for ${editingStudent.first_name}`, "success", "Learner Updated");
@@ -1139,23 +1271,23 @@ export function AdminManagementView({
         )}
 
         {/* Schools & Classrooms Grid */}
-        <div className="grid gap-6 xl:grid-cols-2">
+        <div className="grid min-w-0 gap-6 min-[1800px]:grid-cols-2">
           {/* Schools Table */}
-          <div className="panel overflow-hidden border shadow-xs bg-white">
+          <div className="panel min-w-0 overflow-hidden border shadow-xs bg-white">
             <div className="p-4 border-b bg-slate-50 flex items-center justify-between">
               <div>
                 <h3 className="font-black text-navy text-base">Partner Schools ({schools.length})</h3>
                 <p className="text-xs text-muted">Educational organizations with verified legal pilot claims</p>
               </div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-[14px]">
+            <div className="overflow-x-auto min-[1800px]:overflow-x-visible">
+              <table className="w-full table-fixed text-left text-[14px]">
                 <thead className="border-b bg-slate-50 text-[12px] font-black uppercase text-slate-500">
                   <tr>
-                    <th className="px-5 py-3.5">School & District</th>
-                    <th className="px-5 py-3.5">Principal & Contact</th>
-                    <th className="px-5 py-3.5">Status</th>
-                    <th className="px-5 py-3.5 text-right">Actions</th>
+                    <th className="w-[42%] px-5 py-3.5">School & District</th>
+                    <th className="w-[32%] px-5 py-3.5">Principal & Contact</th>
+                    <th className="w-[15%] px-5 py-3.5">Status</th>
+                    <th className="w-[11%] px-5 py-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -1164,16 +1296,16 @@ export function AdminManagementView({
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-3">
                           <EntityAvatar src={s.logo_url} alt={s.name} kind="school" size="md" shape="square" />
-                          <div>
-                            <span className="font-bold text-ink block text-[15px]">{s.name}</span>
-                            <span className="text-xs text-muted">{s.district_name || "District Partner"} · NCES: {s.nces_id || "010000500123"}</span>
-                            <span className="text-xs text-slate-400 block mt-0.5">{s.address}</span>
+                          <div className="min-w-0">
+                            <span className="block break-words font-bold text-ink text-[15px]">{s.name}</span>
+                            <span className="block break-words text-xs text-muted">{s.district_name || "District Partner"} · NCES: {s.nces_id || "010000500123"}</span>
+                            <span className="mt-0.5 block break-words text-xs text-slate-400">{s.address}</span>
                           </div>
                         </div>
                       </td>
-                      <td className="px-5 py-3.5 text-xs text-muted">
-                        <span className="font-bold text-slate-700 block">{s.principal_name || "Dr. Sarah Jenkins"}</span>
-                        <span>{s.contact_email || "principal@school.edu"}</span>
+                      <td className="break-words px-5 py-3.5 text-xs text-muted">
+                        <span className="block break-words font-bold text-slate-700">{s.principal_name || "Dr. Sarah Jenkins"}</span>
+                        <span className="break-all">{s.contact_email || "principal@school.edu"}</span>
                       </td>
                       <td className="px-5 py-3.5">
                         <Badge tone={s.is_active ? "green" : "slate"}>
@@ -1214,33 +1346,33 @@ export function AdminManagementView({
           </div>
 
           {/* Classrooms Table */}
-          <div className="panel overflow-hidden border shadow-xs bg-white">
+          <div className="panel min-w-0 overflow-hidden border shadow-xs bg-white">
             <div className="p-4 border-b bg-slate-50 flex items-center justify-between">
               <div>
                 <h3 className="font-black text-navy text-base">Classrooms ({classes.length})</h3>
                 <p className="text-xs text-muted">Grade levels, assigned teachers, and star targets</p>
               </div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-[14px]">
+            <div className="overflow-x-auto min-[1800px]:overflow-x-visible">
+              <table className="w-full table-fixed text-left text-[14px]">
                 <thead className="border-b bg-slate-50 text-[12px] font-black uppercase text-slate-500">
                   <tr>
-                    <th className="px-5 py-3.5">Class</th>
-                    <th className="px-5 py-3.5">Grade</th>
-                    <th className="px-5 py-3.5">Teacher</th>
-                    <th className="px-5 py-3.5">Reward Goal</th>
-                    <th className="px-5 py-3.5 text-right">Actions</th>
+                    <th className="w-[29%] px-5 py-3.5">Class</th>
+                    <th className="w-[12%] px-5 py-3.5">Grade</th>
+                    <th className="w-[20%] px-5 py-3.5">Teacher</th>
+                    <th className="w-[25%] px-5 py-3.5">Reward Goal</th>
+                    <th className="w-[14%] px-5 py-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {classes.map((c) => (
                     <tr key={c.id} className="hover:bg-slate-50/70">
                       <td className="px-5 py-3.5">
-                        <span className="font-bold text-ink block text-[15px]">{c.name}</span>
+                        <span className="block break-words font-bold text-ink text-[15px]">{c.name}</span>
                         <span className="text-xs text-muted font-bold">{c.enrolled_count ?? 0} active learners</span>
                       </td>
                       <td className="px-5 py-3.5">Grade {c.grade_level === 0 ? "K" : c.grade_level}</td>
-                      <td className="px-5 py-3.5 text-xs text-muted font-medium">{c.assigned_teacher}</td>
+                      <td className="break-words px-5 py-3.5 text-xs font-medium text-muted">{c.assigned_teacher}</td>
                       <td className="px-5 py-3.5 text-xs text-muted">
                         <span className="font-bold text-ink block">{c.reward_title || "Pizza party"}</span>
                         <span className="text-brand font-black">({c.confirmed_stars ?? 0}/{c.target_stars ?? 100}★)</span>
@@ -1295,7 +1427,7 @@ export function AdminManagementView({
               <form
                 action={async (fd) => {
                   const res = await updateSchool(fd);
-                  if (res?.error) showToast(res.error, "error", "Update Failed");
+                  if ("error" in res && res.error) showToast(res.error, "error", "Update Failed");
                   else {
                     setEditingSchool(null);
                     showToast(`Updated verified details for ${editingSchool.name}`, "success", "School Updated");
@@ -1647,6 +1779,15 @@ export function AdminManagementView({
                 Business Hours
                 <input type="text" name="businessHours" placeholder="e.g. 8:00 AM - 9:00 PM" className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal" />
               </label>
+              <label className="text-xs font-bold md:col-span-2 lg:col-span-3">
+                Partner Schools
+                <select required multiple name="schoolIds" className="mt-1 block min-h-28 w-full rounded-lg border bg-white px-3 py-2 text-sm font-normal">
+                  {schools.filter((school) => school.is_active).map((school) => (
+                    <option key={school.id} value={school.id}>{school.name}</option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-[11px] font-normal text-muted">Select one or more schools (Cmd/Ctrl-click to select more than one).</span>
+              </label>
 
               <div className="md:col-span-2 lg:col-span-3">
                 <ImageUploadField
@@ -1678,6 +1819,7 @@ export function AdminManagementView({
               <thead className="border-b bg-slate-50 text-[12px] font-black uppercase text-slate-500">
                 <tr>
                   <th className="px-5 py-3.5">Store Name</th>
+                  <th className="px-5 py-3.5">Partner Schools</th>
                   <th className="px-5 py-3.5">Representative / Hours</th>
                   <th className="px-5 py-3.5">Address & Contact</th>
                   <th className="px-5 py-3.5">Entrance Sign QR</th>
@@ -1696,6 +1838,17 @@ export function AdminManagementView({
                           <span className="text-xs text-muted font-mono">ID: {s.id.slice(0, 8)}...</span>
                         </div>
                       </div>
+                    </td>
+                    <td className="px-5 py-3.5 text-xs text-muted">
+                      {(s.partner_school_names ?? []).length ? (
+                        <div className="flex max-w-52 flex-wrap gap-1">
+                          {s.partner_school_names.map((schoolName: string) => (
+                            <Badge key={schoolName} tone="blue">{schoolName}</Badge>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="font-bold text-amber-700">Needs school link</span>
+                      )}
                     </td>
                     <td className="px-5 py-3.5">
                       <span className="font-bold text-ink block">{s.representative_name || "Manager"}</span>
@@ -1772,35 +1925,34 @@ export function AdminManagementView({
           <div className="panel p-6 bg-gradient-to-br from-white to-blue-50/50 border shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b pb-3">
               <div>
-                <h3 className="font-black text-navy text-base">Storefront Check-In Sign Poster</h3>
-                <p className="text-xs text-muted">Printable sign displayed at partner store entrance doors</p>
+                <h3 className="font-black text-navy text-base">Storefront Check-In Sign Posters</h3>
+                <p className="text-xs text-muted">Each active store has its own unique, revocable check-in QR credential.</p>
               </div>
               <Badge tone="green">A4 / Letter Poster</Badge>
             </div>
 
-            <div className="rounded-2xl border-2 border-dashed border-brand/30 bg-white p-6 text-center space-y-4 shadow-sm">
-              <span className="eyebrow text-brand font-black">CART2CLASS LEARNING PARTNER</span>
-              <div className="flex flex-col items-center justify-center gap-2">
-                <EntityAvatar src={stores[0]?.logo_url} alt={stores[0]?.name || "Store"} kind="store" size="lg" shape="square" />
-                <h4 className="text-3xl font-black text-navy">{stores[0]?.name || "Green Basket Market"}</h4>
-              </div>
-              <p className="text-xs text-muted max-w-sm mx-auto leading-relaxed">
-                Welcome young shoppers! Point your Cart2Class Student App camera at this sign to verify your store visit and begin your aisle mission.
-              </p>
-
-              {/* Automatic High-Resolution Scannable QR Sign */}
-              <div className="py-2 flex justify-center">
-                <InstantQrPreview
-                  payload={`cart2class://check-in/${stores[0]?.id || "00000000-0000-0000-0000-000000000031"}?token=c2c_store_verified`}
-                  label={stores[0]?.name || "Green Basket Market"}
-                  subtitle="Scannable Store Check-In Sign"
-                  size={168}
-                />
-              </div>
-
-              <p className="text-[11px] text-muted font-medium">
-                Position this sign at child eye-level (approx. 3.5 to 4 feet) near the store entrance or produce section.
-              </p>
+            <div className="grid gap-4 xl:grid-cols-2">
+              {stores.filter((store) => store.is_active).map((store) => (
+                <div key={store.id} className="rounded-2xl border-2 border-dashed border-brand/30 bg-white p-5 text-center shadow-sm">
+                  <span className="eyebrow font-black text-brand">CART2CLASS LEARNING PARTNER</span>
+                  <div className="mt-3 flex flex-col items-center justify-center gap-2">
+                    <EntityAvatar src={store.logo_url} alt={store.name} kind="store" size="lg" shape="square" />
+                    <h4 className="text-xl font-black text-navy">{store.name}</h4>
+                  </div>
+                  <p className="mx-auto mt-3 max-w-sm text-xs leading-relaxed text-muted">Students scan this store&apos;s sign to verify their visit and begin an aisle mission.</p>
+                  <div className="py-4">
+                    <QrExportButton
+                      bare
+                      autoIssue
+                      size={150}
+                      type="store"
+                      target={{ id: store.id, label: store.name, subtitle: "Store check-in · Scan to begin a Cart2Class mission" }}
+                    />
+                  </div>
+                  <p className="text-[11px] font-medium text-muted">Position at child eye-level near the store entrance or produce section.</p>
+                </div>
+              ))}
+              {!stores.some((store) => store.is_active) && <p className="text-xs text-muted">No active store check-in signs are available.</p>}
             </div>
           </div>
 
@@ -1854,7 +2006,7 @@ export function AdminManagementView({
               <form
                 action={async (fd) => {
                   const res = await updateStore(fd);
-                  if (res?.error) showToast(res.error, "error", "Update Failed");
+                  if ("error" in res) showToast(res.error, "error", "Update Failed");
                   else {
                     setEditingStore(null);
                     showToast(`Updated partner store details for ${editingStore.name}`, "success", "Store Updated");
@@ -1911,6 +2063,21 @@ export function AdminManagementView({
                     defaultValue={editingStore.address || ""}
                     className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 text-sm font-normal"
                   />
+                </label>
+                <label className="block">
+                  Partner Schools
+                  <select
+                    required
+                    multiple
+                    name="schoolIds"
+                    defaultValue={editingStore.partner_school_ids ?? []}
+                    className="mt-1 block min-h-28 w-full rounded-lg border bg-white px-3 py-2 text-sm font-normal"
+                  >
+                    {schools.filter((school) => school.is_active).map((school) => (
+                      <option key={school.id} value={school.id}>{school.name}</option>
+                    ))}
+                  </select>
+                  <span className="mt-1 block text-[11px] font-normal text-muted">Select every school served by this store (Cmd/Ctrl-click for multiple).</span>
                 </label>
                 <ImageUploadField
                   label="Store Logo / Front Image"

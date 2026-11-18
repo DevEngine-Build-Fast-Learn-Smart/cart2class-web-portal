@@ -1,8 +1,10 @@
 import { notFound, redirect } from "next/navigation";
 import { roles, type Role } from "@/types/domain";
 import { requireRole } from "@/lib/permissions/access";
+import { roleLoginUrls } from "@/lib/constants/roles";
 import { createClient } from "@/lib/supabase/server";
 import { RoleLoginView } from "@/features/authentication/role-login-view";
+import { RoleAccountSwitchView } from "@/features/authentication/role-account-switch-view";
 import { PortalShell } from "@/components/layout/portal-shell";
 import { DashboardView } from "@/features/dashboard/dashboard-view";
 import { getDashboardData } from "@/features/dashboard/service";
@@ -20,6 +22,7 @@ import { TeacherStudentManageView } from "@/features/dashboard/teacher-student-m
 import { TeacherClassesView } from "@/features/dashboard/teacher-classes-view";
 import { ParentPortalView } from "@/features/dashboard/parent-portal-view";
 import { MissionBuilderView } from "@/features/missions/mission-builder-view";
+import { MissionBuilderStartView } from "@/features/missions/mission-builder-start-view";
 import { MissionLibraryView } from "@/features/missions/mission-library-view";
 import { QrBarcodeManagementView } from "@/features/dashboard/qr-barcode-management-view";
 
@@ -27,21 +30,22 @@ type Row = Record<string, any>;
 
 export default async function PortalPage({
   params,
-  searchParams
+  searchParams,
 }: {
   params: Promise<{ role: string; slug?: string[] }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { role: inputRole, slug = [] } = await params;
   const query = searchParams ? await searchParams : {};
-  const requestedMissionId = typeof query.id === "string" ? query.id : undefined;
+  const requestedMissionId =
+    typeof query.id === "string" ? query.id : undefined;
   if (!roles.includes(inputRole as Role)) notFound();
   const role = inputRole as Role;
 
   const client = await createClient();
   if (client) {
     const {
-      data: { user }
+      data: { user },
     } = await client.auth.getUser();
 
     if (!user) {
@@ -53,6 +57,29 @@ export default async function PortalPage({
       }
       redirect(`/${role}` as never);
     }
+    const { data: memberships } = await client
+      .from("role_memberships")
+      .select("role")
+      .eq("user_id", user.id)
+      .eq("is_active", true);
+    const currentRoles = (memberships ?? []).map(
+      (membership) => membership.role as Role,
+    );
+    if (!currentRoles.includes(role)) {
+      // Each role root doubles as that role's dedicated sign-in URL. Keep a
+      // current, different account out of the requested role instead of
+      // silently redirecting it back to its own dashboard.
+      if (slug.length === 0) {
+        return (
+          <RoleAccountSwitchView
+            targetRole={role}
+            currentRoles={currentRoles}
+            email={user.email}
+          />
+        );
+      }
+      redirect(`${roleLoginUrls[role]}?switch-account=1` as never);
+    }
   }
 
   const access = await requireRole(role);
@@ -61,9 +88,13 @@ export default async function PortalPage({
     return (
       <main className="grid min-h-screen place-items-center p-5">
         <section className="panel max-w-lg p-7">
-          <h1 className="text-2xl font-extrabold">Supabase needs configuration</h1>
+          <h1 className="text-2xl font-extrabold">
+            Supabase needs configuration
+          </h1>
           <p className="mt-3 text-sm leading-6 text-muted">
-            Add the project URL and publishable key to a local <code>.env.local</code> file, apply the repository migrations, and restart the app.
+            Add the project URL and publishable key to a local{" "}
+            <code>.env.local</code> file, apply the repository migrations, and
+            restart the app.
           </p>
         </section>
       </main>
@@ -78,7 +109,13 @@ export default async function PortalPage({
   if (!currentSlug) {
     // Overview Dashboard
     const data = await getDashboardData(supabase, role, access.profile.id);
-    content = <DashboardView role={role} displayName={access.profile.display_name} {...data} />;
+    content = (
+      <DashboardView
+        role={role}
+        displayName={access.profile.display_name}
+        {...data}
+      />
+    );
   } else if (currentSlug === "barcodes") {
     const [
       { data: products },
@@ -92,7 +129,7 @@ export default async function PortalPage({
       { data: attempts },
       { data: assignments },
       { data: runs },
-      { data: auditLogs }
+      { data: auditLogs },
     ] = await Promise.all([
       supabase
         .from("products")
@@ -106,7 +143,9 @@ export default async function PortalPage({
         .order("name"),
       supabase
         .from("missions")
-        .select("id,title,mission_number,current_version,status,estimated_minutes")
+        .select(
+          "id,title,mission_number,current_version,status,estimated_minutes",
+        )
         .order("updated_at", { ascending: false }),
       supabase
         .from("students")
@@ -116,85 +155,131 @@ export default async function PortalPage({
       supabase.from("stores").select("id,name,is_active").order("name"),
       supabase.from("student_device_sessions").select("student_id,created_at"),
       supabase.from("store_checkin_events").select("store_id,occurred_at"),
-      supabase.from("mission_attempts").select("id,assignment_id,started_at,status"),
+      supabase
+        .from("mission_attempts")
+        .select("id,assignment_id,started_at,status"),
       supabase.from("mission_assignments").select("id,mission_id"),
-      supabase.from("mission_runs").select("mission_id,products_scanned,updated_at"),
+      supabase
+        .from("mission_runs")
+        .select("mission_id,products_scanned,updated_at"),
       supabase
         .from("audit_logs")
         .select("action,entity_id,metadata,created_at")
-        .in("action", ["barcode.scanned", "student.login", "student.mission_activity", "student.mission_completed"])
+        .in("action", [
+          "barcode.scanned",
+          "student.login",
+          "student.mission_activity",
+          "student.mission_completed",
+        ]),
     ]);
 
     const classNameById = new Map((classes ?? []).map((c) => [c.id, c.name]));
-    const missionTitleById = new Map((missions ?? []).map((m) => [m.id, m.title]));
-    const missionIdByAssignment = new Map((assignments ?? []).map((a) => [a.id, a.mission_id]));
+    const missionTitleById = new Map(
+      (missions ?? []).map((m) => [m.id, m.title]),
+    );
+    const missionIdByAssignment = new Map(
+      (assignments ?? []).map((a) => [a.id, a.mission_id]),
+    );
 
     // 1. Student QR Card usage map (logins)
-    const studentUsageMap = new Map<string, { count: number; lastUsedAt: string | null }>();
+    const studentUsageMap = new Map<
+      string,
+      { count: number; lastUsedAt: string | null }
+    >();
     for (const sess of sessions ?? []) {
       if (sess.student_id) {
-        const prev = studentUsageMap.get(sess.student_id) ?? { count: 0, lastUsedAt: null };
+        const prev = studentUsageMap.get(sess.student_id) ?? {
+          count: 0,
+          lastUsedAt: null,
+        };
         studentUsageMap.set(sess.student_id, {
           count: prev.count + 1,
-          lastUsedAt: prev.lastUsedAt || sess.created_at || null
+          lastUsedAt: prev.lastUsedAt || sess.created_at || null,
         });
       }
     }
     for (const log of auditLogs ?? []) {
       if (log.action === "student.login" && log.entity_id) {
-        const prev = studentUsageMap.get(log.entity_id) ?? { count: 0, lastUsedAt: null };
+        const prev = studentUsageMap.get(log.entity_id) ?? {
+          count: 0,
+          lastUsedAt: null,
+        };
         studentUsageMap.set(log.entity_id, {
           count: prev.count + 1,
-          lastUsedAt: prev.lastUsedAt || log.created_at || null
+          lastUsedAt: prev.lastUsedAt || log.created_at || null,
         });
       }
     }
 
     // 2. Store Check-in QR usage map
-    const storeUsageMap = new Map<string, { count: number; lastUsedAt: string | null }>();
+    const storeUsageMap = new Map<
+      string,
+      { count: number; lastUsedAt: string | null }
+    >();
     for (const chk of checkins ?? []) {
       if (chk.store_id) {
-        const prev = storeUsageMap.get(chk.store_id) ?? { count: 0, lastUsedAt: null };
+        const prev = storeUsageMap.get(chk.store_id) ?? {
+          count: 0,
+          lastUsedAt: null,
+        };
         storeUsageMap.set(chk.store_id, {
           count: prev.count + 1,
-          lastUsedAt: prev.lastUsedAt || chk.occurred_at || null
+          lastUsedAt: prev.lastUsedAt || chk.occurred_at || null,
         });
       }
     }
 
     // 3. Mission QR usage map (launches / attempts)
-    const missionUsageMap = new Map<string, { count: number; lastUsedAt: string | null }>();
+    const missionUsageMap = new Map<
+      string,
+      { count: number; lastUsedAt: string | null }
+    >();
     for (const att of attempts ?? []) {
-      const mid = att.assignment_id ? missionIdByAssignment.get(att.assignment_id) : null;
+      const mid = att.assignment_id
+        ? missionIdByAssignment.get(att.assignment_id)
+        : null;
       if (mid) {
         const prev = missionUsageMap.get(mid) ?? { count: 0, lastUsedAt: null };
         missionUsageMap.set(mid, {
           count: prev.count + 1,
-          lastUsedAt: prev.lastUsedAt || att.started_at || null
+          lastUsedAt: prev.lastUsedAt || att.started_at || null,
         });
       }
     }
     for (const run of runs ?? []) {
       if (run.mission_id) {
-        const prev = missionUsageMap.get(run.mission_id) ?? { count: 0, lastUsedAt: null };
+        const prev = missionUsageMap.get(run.mission_id) ?? {
+          count: 0,
+          lastUsedAt: null,
+        };
         missionUsageMap.set(run.mission_id, {
           count: prev.count + 1,
-          lastUsedAt: prev.lastUsedAt || run.updated_at || null
+          lastUsedAt: prev.lastUsedAt || run.updated_at || null,
         });
       }
     }
     for (const log of auditLogs ?? []) {
-      if ((log.action === "student.mission_activity" || log.action === "student.mission_completed") && log.entity_id) {
-        const prev = missionUsageMap.get(log.entity_id) ?? { count: 0, lastUsedAt: null };
+      if (
+        (log.action === "student.mission_activity" ||
+          log.action === "student.mission_completed") &&
+        log.entity_id
+      ) {
+        const prev = missionUsageMap.get(log.entity_id) ?? {
+          count: 0,
+          lastUsedAt: null,
+        };
         missionUsageMap.set(log.entity_id, {
           count: prev.count + 1,
-          lastUsedAt: prev.lastUsedAt || log.created_at || null
+          lastUsedAt: prev.lastUsedAt || log.created_at || null,
         });
       }
     }
 
     // 4. Product Barcode usage map (aisle camera scans)
-    const barcodeUsageMap = new Map<string, { count: number; lastUsedAt: string | null }>();
+    const barcodeUsageMap = new Map<
+      string,
+      { count: number; lastUsedAt: string | null }
+    >();
     for (const log of auditLogs ?? []) {
       if (log.action === "barcode.scanned") {
         const b = log.entity_id || (log.metadata as any)?.barcode;
@@ -202,7 +287,7 @@ export default async function PortalPage({
           const prev = barcodeUsageMap.get(b) ?? { count: 0, lastUsedAt: null };
           barcodeUsageMap.set(b, {
             count: prev.count + 1,
-            lastUsedAt: prev.lastUsedAt || log.created_at || null
+            lastUsedAt: prev.lastUsedAt || log.created_at || null,
           });
         }
       }
@@ -211,10 +296,13 @@ export default async function PortalPage({
       if (Array.isArray(run.products_scanned)) {
         for (const scanned of run.products_scanned) {
           if (scanned && typeof scanned === "string") {
-            const prev = barcodeUsageMap.get(scanned) ?? { count: 0, lastUsedAt: null };
+            const prev = barcodeUsageMap.get(scanned) ?? {
+              count: 0,
+              lastUsedAt: null,
+            };
             barcodeUsageMap.set(scanned, {
               count: prev.count + 1,
-              lastUsedAt: prev.lastUsedAt || run.updated_at || null
+              lastUsedAt: prev.lastUsedAt || run.updated_at || null,
             });
           }
         }
@@ -225,7 +313,8 @@ export default async function PortalPage({
     const barcodeMap = new Map<string, any>();
     for (const p of products ?? []) {
       if (p.barcode) {
-        const usage = barcodeUsageMap.get(p.barcode) || barcodeUsageMap.get(p.id) || { count: 0, lastUsedAt: null };
+        const usage = barcodeUsageMap.get(p.barcode) ||
+          barcodeUsageMap.get(p.id) || { count: 0, lastUsedAt: null };
         barcodeMap.set(p.barcode, {
           id: p.id,
           name: p.name,
@@ -235,26 +324,28 @@ export default async function PortalPage({
           category: p.category || "Produce",
           mission_product_id: null,
           usage_count: usage.count,
-          last_used_at: usage.lastUsedAt
+          last_used_at: usage.lastUsedAt,
         });
       }
     }
     for (const mp of missionProducts ?? []) {
       if (mp.barcode) {
         const prev = barcodeMap.get(mp.barcode);
-        const usage = barcodeUsageMap.get(mp.barcode) || barcodeUsageMap.get(mp.id) || { count: 0, lastUsedAt: null };
+        const usage = barcodeUsageMap.get(mp.barcode) ||
+          barcodeUsageMap.get(mp.id) || { count: 0, lastUsedAt: null };
         barcodeMap.set(mp.barcode, {
           id: prev?.id || mp.id,
           name: mp.name,
           barcode: mp.barcode,
-          price: mp.price_cents ? mp.price_cents / 100 : prev?.price ?? 1.0,
+          price: mp.price_cents ? mp.price_cents / 100 : (prev?.price ?? 1.0),
           package_size: mp.package_size || prev?.package_size || "1 each",
           category: prev?.category || "Mission Produce",
           mission_id: mp.mission_id,
-          mission_title: missionTitleById.get(mp.mission_id) || "Assigned Mission",
+          mission_title:
+            missionTitleById.get(mp.mission_id) || "Assigned Mission",
           mission_product_id: mp.id,
           usage_count: Math.max(prev?.usage_count || 0, usage.count),
-          last_used_at: prev?.last_used_at || usage.lastUsedAt
+          last_used_at: prev?.last_used_at || usage.lastUsedAt,
         });
       }
     }
@@ -264,7 +355,10 @@ export default async function PortalPage({
         role={role as "admin" | "teacher" | "store"}
         products={Array.from(barcodeMap.values())}
         missions={(missions ?? []).map((m) => {
-          const usage = missionUsageMap.get(m.id) || { count: 0, lastUsedAt: null };
+          const usage = missionUsageMap.get(m.id) || {
+            count: 0,
+            lastUsedAt: null,
+          };
           return {
             id: m.id,
             title: m.title,
@@ -273,11 +367,14 @@ export default async function PortalPage({
             status: m.status,
             minutes: m.estimated_minutes ?? 12,
             usage_count: usage.count,
-            last_used_at: usage.lastUsedAt
+            last_used_at: usage.lastUsedAt,
           };
         })}
         students={(students ?? []).map((s) => {
-          const usage = studentUsageMap.get(s.id) || { count: 0, lastUsedAt: null };
+          const usage = studentUsageMap.get(s.id) || {
+            count: 0,
+            lastUsedAt: null,
+          };
           return {
             id: s.id,
             name: `${s.first_name} ${s.last_initial ?? ""}`.trim(),
@@ -285,17 +382,20 @@ export default async function PortalPage({
             grade: s.grade_level,
             active: s.is_active,
             usage_count: usage.count,
-            last_used_at: usage.lastUsedAt
+            last_used_at: usage.lastUsedAt,
           };
         })}
         stores={(stores ?? []).map((st) => {
-          const usage = storeUsageMap.get(st.id) || { count: 0, lastUsedAt: null };
+          const usage = storeUsageMap.get(st.id) || {
+            count: 0,
+            lastUsedAt: null,
+          };
           return {
             id: st.id,
             name: st.name,
             active: st.is_active,
             usage_count: usage.count,
-            last_used_at: usage.lastUsedAt
+            last_used_at: usage.lastUsedAt,
           };
         })}
       />
@@ -311,47 +411,104 @@ export default async function PortalPage({
         { data: stores },
         { data: rewards },
         { data: parentLinks },
-        { data: teacherLinks }
+        { data: teacherLinks },
+        { data: storeLinks },
+        { data: schoolStoreLinks },
       ] = await Promise.all([
-        supabase.from("profiles").select("id,display_name,account_status,avatar_url").order("display_name"),
+        supabase
+          .from("profiles")
+          .select("id,display_name,account_status,avatar_url")
+          .order("display_name"),
         supabase.from("role_memberships").select("user_id,role"),
-        supabase.from("students").select("id,first_name,last_initial,grade_level,class_id,parent_invite_code,card_code,is_active,avatar_url").order("first_name"),
+        supabase
+          .from("students")
+          .select(
+            "id,first_name,last_initial,grade_level,school_id,class_id,parent_invite_code,card_code,is_active,avatar_url",
+          )
+          .order("first_name"),
         supabase.from("schools").select("*").order("name"),
-        supabase.from("classes").select("id,school_id,name,grade_level,school_year,reward_title,confirmed_stars,target_stars,is_active").order("grade_level"),
-        supabase.from("stores").select("id,name,contact_email,address,representative_name,business_hours,is_active,logo_url").order("name"),
-        supabase.from("reward_goals").select("id,title,current_stars,target_stars,status,class_id,store_id").order("created_at", { ascending: false }),
-        supabase.from("parent_student_relationships").select("parent_user_id,student_id,is_active"),
-        supabase.from("teacher_class_assignments").select("teacher_user_id,class_id,is_active")
+        supabase
+          .from("classes")
+          .select(
+            "id,school_id,name,grade_level,school_year,reward_title,confirmed_stars,target_stars,is_active",
+          )
+          .order("grade_level"),
+        supabase
+          .from("stores")
+          .select(
+            "id,name,contact_email,address,representative_name,business_hours,is_active,logo_url",
+          )
+          .order("name"),
+        supabase
+          .from("reward_goals")
+          .select(
+            "id,title,current_stars,target_stars,status,class_id,store_id",
+          )
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("parent_student_relationships")
+          .select("parent_user_id,student_id,is_active"),
+        supabase
+          .from("teacher_class_assignments")
+          .select("teacher_user_id,class_id,is_active"),
+        supabase
+          .from("store_memberships")
+          .select("user_id,store_id,is_active"),
+        supabase
+          .from("school_store_partnerships")
+          .select("school_id,store_id,is_active"),
       ]);
 
       let resolvedProfiles: Row[] | null = profiles as Row[] | null;
       if (!resolvedProfiles) {
-        const { data: fb } = await supabase.from("profiles").select("id,display_name,account_status").order("display_name");
+        const { data: fb } = await supabase
+          .from("profiles")
+          .select("id,display_name,account_status")
+          .order("display_name");
         resolvedProfiles = fb as Row[] | null;
       }
       let resolvedStudents: Row[] | null = students as Row[] | null;
       if (!resolvedStudents) {
-        const { data: fb } = await supabase.from("students").select("id,first_name,last_initial,grade_level,class_id,parent_invite_code,card_code,is_active").order("first_name");
+        const { data: fb } = await supabase
+          .from("students")
+          .select(
+            "id,first_name,last_initial,grade_level,school_id,class_id,parent_invite_code,card_code,is_active",
+          )
+          .order("first_name");
         resolvedStudents = fb as Row[] | null;
       }
       let resolvedStores: Row[] | null = stores as Row[] | null;
       if (!resolvedStores) {
-        const { data: fb } = await supabase.from("stores").select("id,name,contact_email,address,representative_name,business_hours,is_active").order("name");
+        const { data: fb } = await supabase
+          .from("stores")
+          .select(
+            "id,name,contact_email,address,representative_name,business_hours,is_active",
+          )
+          .order("name");
         resolvedStores = fb as Row[] | null;
       }
 
-      const roleByUser = new Map((memberships ?? []).map((m) => [m.user_id, m.role]));
+      const roleByUser = new Map(
+        (memberships ?? []).map((m) => [m.user_id, m.role]),
+      );
       const className = new Map((classes ?? []).map((c) => [c.id, c.name]));
-      const profileNameById = new Map((resolvedProfiles ?? []).map((p) => [p.id, p.display_name]));
+      const classById = new Map((classes ?? []).map((c) => [c.id, c]));
+      const schoolNameById = new Map((schools ?? []).map((school) => [school.id, school.name]));
+      const profileNameById = new Map(
+        (resolvedProfiles ?? []).map((p) => [p.id, p.display_name]),
+      );
 
       // Active parent link lookup
-      const parentMap = new Map<string, { parentId: string; parentName: string }>();
+      const parentMap = new Map<string, { parentId: string; parentName: string }[]>();
       for (const link of parentLinks ?? []) {
         if (link.is_active && link.student_id) {
-          parentMap.set(link.student_id, {
+          const studentParents = parentMap.get(link.student_id) ?? [];
+          studentParents.push({
             parentId: link.parent_user_id,
-            parentName: profileNameById.get(link.parent_user_id) ?? "Linked Parent"
+            parentName:
+              profileNameById.get(link.parent_user_id) ?? "Linked Parent",
           });
+          parentMap.set(link.student_id, studentParents);
         }
       }
 
@@ -359,30 +516,82 @@ export default async function PortalPage({
       const teacherMap = new Map<string, string>();
       for (const link of teacherLinks ?? []) {
         if (link.is_active && link.class_id) {
-          teacherMap.set(link.class_id, profileNameById.get(link.teacher_user_id) ?? "Assigned Teacher");
+          teacherMap.set(
+            link.class_id,
+            profileNameById.get(link.teacher_user_id) ?? "Assigned Teacher",
+          );
         }
       }
 
-      const enrichedProfiles = (resolvedProfiles ?? []).map((p) => ({
-        ...p,
-        role: roleByUser.get(p.id) ?? "—"
-      }));
+      const teacherAssignmentByUser = new Map<string, string>();
+      for (const link of teacherLinks ?? []) {
+        if (link.is_active && link.teacher_user_id && !teacherAssignmentByUser.has(link.teacher_user_id)) {
+          teacherAssignmentByUser.set(link.teacher_user_id, link.class_id);
+        }
+      }
+      const storeAssignmentByUser = new Map<string, string>();
+      for (const link of storeLinks ?? []) {
+        if (link.is_active && link.user_id && !storeAssignmentByUser.has(link.user_id)) {
+          storeAssignmentByUser.set(link.user_id, link.store_id);
+        }
+      }
+      const schoolsByStore = new Map<string, string[]>();
+      for (const link of schoolStoreLinks ?? []) {
+        if (link.is_active && link.store_id && link.school_id) {
+          const linkedSchools = schoolsByStore.get(link.store_id) ?? [];
+          linkedSchools.push(link.school_id);
+          schoolsByStore.set(link.store_id, linkedSchools);
+        }
+      }
+
+      const enrichedProfiles = (resolvedProfiles ?? []).map((p) => {
+        const role = roleByUser.get(p.id) ?? "—";
+        const assignedClassId = teacherAssignmentByUser.get(p.id) ?? null;
+        const assignedStoreId = storeAssignmentByUser.get(p.id) ?? null;
+        const assignedSchoolId = assignedClassId ? classById.get(assignedClassId)?.school_id ?? null : null;
+        return {
+          ...p,
+          role,
+          assigned_class_id: assignedClassId,
+          assigned_school_id: assignedSchoolId,
+          assigned_store_id: assignedStoreId,
+          assignment_label: role === "teacher"
+            ? `${assignedSchoolId ? schoolNameById.get(assignedSchoolId) ?? "School" : "Unassigned school"} · ${assignedClassId ? className.get(assignedClassId) ?? "Classroom" : "Unassigned classroom"}`
+            : role === "store"
+              ? (resolvedStores ?? []).find((store) => store.id === assignedStoreId)?.name ?? "Unassigned store"
+              : role === "parent" ? "Linked learners managed below" : "Organization administrator",
+        };
+      });
 
       const enrichedStudents = (resolvedStudents ?? []).map((st) => {
-        const parentInfo = parentMap.get(st.id);
+        const linkedParents = parentMap.get(st.id) ?? [];
+        const parentInfo = linkedParents[0];
         return {
           ...st,
           class_name: className.get(st.class_id) ?? "Unassigned",
           linked_parent_id: parentInfo?.parentId ?? null,
-          linked_parent_name: parentInfo?.parentName ?? null
+          linked_parent_name: parentInfo?.parentName ?? null,
+          linked_parents: linkedParents,
         };
       });
 
       const enrichedClasses = (classes ?? []).map((c) => ({
         ...c,
+        school_name: schoolNameById.get(c.school_id) ?? "School",
         assigned_teacher: teacherMap.get(c.id) ?? "Not assigned yet",
-        enrolled_count: (resolvedStudents ?? []).filter((st) => st.class_id === c.id && st.is_active).length
+        enrolled_count: (resolvedStudents ?? []).filter(
+          (st) => st.class_id === c.id && st.is_active,
+        ).length,
       }));
+
+      const enrichedStores = (resolvedStores ?? []).map((store) => {
+        const partnerSchoolIds = schoolsByStore.get(store.id) ?? [];
+        return {
+          ...store,
+          partner_school_ids: partnerSchoolIds,
+          partner_school_names: partnerSchoolIds.map((schoolId) => schoolNameById.get(schoolId)).filter(Boolean),
+        };
+      });
 
       if (currentSlug === "reports") {
         content = (
@@ -390,7 +599,7 @@ export default async function PortalPage({
             schools={schools ?? []}
             classes={enrichedClasses}
             students={enrichedStudents}
-            stores={resolvedStores ?? []}
+            stores={enrichedStores}
             rewards={rewards ?? []}
             profiles={enrichedProfiles}
           />
@@ -403,16 +612,26 @@ export default async function PortalPage({
             students={enrichedStudents}
             schools={schools ?? []}
             classes={enrichedClasses}
-            stores={resolvedStores ?? []}
+            stores={enrichedStores}
             rewards={rewards ?? []}
           />
         );
       }
     } else if (currentSlug === "settings") {
-      const { data: orgs } = await supabase.from("organizations").select("*").order("name");
+      const { data: orgs } = await supabase
+        .from("organizations")
+        .select("*")
+        .order("name");
       content = <AdminSettingsView organizations={orgs ?? []} />;
-    } else if (["legal", "deletion-requests", "audit-logs"].includes(currentSlug)) {
-      content = <AdminLegalView slug={currentSlug as "legal" | "deletion-requests" | "audit-logs"} supabase={supabase} />;
+    } else if (
+      ["legal", "deletion-requests", "audit-logs"].includes(currentSlug)
+    ) {
+      content = (
+        <AdminLegalView
+          slug={currentSlug as "legal" | "deletion-requests" | "audit-logs"}
+          supabase={supabase}
+        />
+      );
     } else if (currentSlug === "library") {
       // Auto-synchronize any published missions whose sharing status was pending
       await supabase
@@ -429,16 +648,27 @@ export default async function PortalPage({
         { data: classes },
         { data: stores },
         { data: reviews },
-        { data: studentAssignments }
+        { data: studentAssignments },
       ] = await Promise.all([
-        supabase.from("missions").select("*").order("updated_at", { ascending: false }),
-        supabase.from("mission_attempts").select("*").order("started_at", { ascending: false }),
+        supabase
+          .from("missions")
+          .select("*")
+          .order("updated_at", { ascending: false }),
+        supabase
+          .from("mission_attempts")
+          .select("*")
+          .order("started_at", { ascending: false }),
         supabase.from("mission_assignments").select("*"),
-        supabase.from("students").select("id,first_name,last_initial,grade_level,class_id,avatar_url"),
+        supabase
+          .from("students")
+          .select("id,first_name,last_initial,grade_level,class_id,avatar_url"),
         supabase.from("classes").select("id,name,grade_level"),
         supabase.from("stores").select("id,name"),
-        supabase.from("mission_reviews").select("*").order("created_at", { ascending: false }),
-        supabase.from("mission_student_assignments").select("*")
+        supabase
+          .from("mission_reviews")
+          .select("*")
+          .order("created_at", { ascending: false }),
+        supabase.from("mission_student_assignments").select("*"),
       ]);
 
       content = (
@@ -454,7 +684,35 @@ export default async function PortalPage({
           role="admin"
         />
       );
-    } else if (currentSlug === "missions" && (requestedMissionId || query.tab === "builder")) {
+    } else if (
+      currentSlug === "missions" &&
+      query.tab === "builder" &&
+      !requestedMissionId
+    ) {
+      const [{ data: missions }, { data: stores }, { data: classes }, { data: students }] =
+        await Promise.all([
+          supabase
+            .from("missions")
+            .select("id,title,mission_number,status,sharing_status")
+            .order("updated_at", { ascending: false }),
+          supabase.from("stores").select("id,name").order("name"),
+          supabase.from("classes").select("id,name,grade_level").order("name"),
+          supabase
+            .from("students")
+            .select("id,first_name,last_initial,grade_level,class_id")
+            .order("first_name"),
+        ]);
+
+      content = (
+        <MissionBuilderStartView
+          role="admin"
+          missions={missions ?? []}
+          stores={stores ?? []}
+          classes={classes ?? []}
+          students={students ?? []}
+        />
+      );
+    } else if (currentSlug === "missions" && requestedMissionId) {
       let mission: Row;
       if (requestedMissionId) {
         const { data: m } = await supabase
@@ -472,7 +730,7 @@ export default async function PortalPage({
           estimated_minutes: 12,
           stars: 5,
           status: "draft",
-          sharing_status: "private"
+          sharing_status: "private",
         };
       } else {
         const { data: missions } = await supabase
@@ -490,7 +748,7 @@ export default async function PortalPage({
           estimated_minutes: 12,
           stars: 5,
           status: "published",
-          sharing_status: "approved"
+          sharing_status: "approved",
         };
       }
 
@@ -503,17 +761,40 @@ export default async function PortalPage({
         { data: classes },
         { data: reviews },
         { data: students },
-        { data: studentAssignments }
+        { data: studentAssignments },
       ] = await Promise.all([
-        supabase.from("missions").select("id,title,mission_number,status,sharing_status").order("updated_at", { ascending: false }),
-        supabase.from("mission_versions").select("id").eq("mission_id", mission.id).limit(1),
-        supabase.from("mission_products").select("*").eq("mission_id", mission.id).order("order_index"),
-        supabase.from("mission_assets").select("*").or(`mission_id.eq.${mission.id},mission_id.is.null`),
+        supabase
+          .from("missions")
+          .select("id,title,mission_number,status,sharing_status")
+          .order("updated_at", { ascending: false }),
+        supabase
+          .from("mission_versions")
+          .select("id")
+          .eq("mission_id", mission.id)
+          .limit(1),
+        supabase
+          .from("mission_products")
+          .select("*")
+          .eq("mission_id", mission.id)
+          .order("order_index"),
+        supabase
+          .from("mission_assets")
+          .select("*")
+          .or(`mission_id.eq.${mission.id},mission_id.is.null`),
         supabase.from("stores").select("id,name").order("name"),
         supabase.from("classes").select("id,name,grade_level").order("name"),
-        supabase.from("mission_reviews").select("*").eq("mission_id", mission.id).order("created_at", { ascending: false }),
-        supabase.from("students").select("id,first_name,last_initial,grade_level,class_id,avatar_url"),
-        supabase.from("mission_student_assignments").select("*").eq("mission_id", mission.id)
+        supabase
+          .from("mission_reviews")
+          .select("*")
+          .eq("mission_id", mission.id)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("students")
+          .select("id,first_name,last_initial,grade_level,class_id,avatar_url"),
+        supabase
+          .from("mission_student_assignments")
+          .select("*")
+          .eq("mission_id", mission.id),
       ]);
 
       const versionId = versions?.[0]?.id;
@@ -538,7 +819,8 @@ export default async function PortalPage({
             .order("question_order");
 
           for (const q of questions ?? []) {
-            if (!questionsByStage[q.stage_id]) questionsByStage[q.stage_id] = [];
+            if (!questionsByStage[q.stage_id])
+              questionsByStage[q.stage_id] = [];
             questionsByStage[q.stage_id].push(q);
           }
         }
@@ -566,7 +848,11 @@ export default async function PortalPage({
       content = <AdminSectionView slug={currentSlug} supabase={supabase} />;
     }
   } else if (role === "parent") {
-    if (["children", "progress", "recordings", "leaderboard"].includes(currentSlug)) {
+    if (
+      ["children", "progress", "recordings", "leaderboard"].includes(
+        currentSlug,
+      )
+    ) {
       const [
         { data: students },
         { data: assignments },
@@ -575,21 +861,52 @@ export default async function PortalPage({
         { data: rewardGoals },
         { data: classes },
         { data: schools },
-        { data: attemptsLog }
+        { data: attemptsLog },
       ] = await Promise.all([
-        supabase.from("students").select("id,first_name,last_initial,grade_level,class_id,parent_invite_code,card_code,is_active,avatar_url").order("first_name"),
-        supabase.from("mission_assignments").select("id,status,available_at,due_at,mission:missions(id,title,description,estimated_minutes),class:classes(id,name,grade_level)").order("created_at", { ascending: false }),
-        supabase.from("mission_attempts").select("id,student_id,status,completed_at,stars_earned,assignment_id,started_at").order("started_at", { ascending: false }),
-        supabase.from("reading_recordings").select("id,student_id,storage_path,review_status,reviewer_feedback,recorded_at").order("recorded_at", { ascending: false }),
-        supabase.from("reward_goals").select("id,class_id,title,current_stars,target_stars,status"),
+        supabase
+          .from("students")
+          .select(
+            "id,first_name,last_initial,grade_level,class_id,parent_invite_code,card_code,is_active,avatar_url",
+          )
+          .order("first_name"),
+        supabase
+          .from("mission_assignments")
+          .select(
+            "id,status,available_at,due_at,mission:missions(id,title,description,estimated_minutes),class:classes(id,name,grade_level)",
+          )
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("mission_attempts")
+          .select(
+            "id,student_id,status,completed_at,stars_earned,assignment_id,started_at",
+          )
+          .order("started_at", { ascending: false }),
+        supabase
+          .from("reading_recordings")
+          .select(
+            "id,student_id,storage_path,review_status,reviewer_feedback,recorded_at",
+          )
+          .order("recorded_at", { ascending: false }),
+        supabase
+          .from("reward_goals")
+          .select("id,class_id,title,current_stars,target_stars,status"),
         supabase.from("classes").select("id,name,school_id,grade_level"),
         supabase.from("schools").select("id,name"),
-        supabase.from("question_attempts").select("id,student_id,prompt,answer_given,is_correct,answered_at").order("answered_at", { ascending: false }).limit(20)
+        supabase
+          .from("question_attempts")
+          .select("id,student_id,prompt,answer_given,is_correct,answered_at")
+          .order("answered_at", { ascending: false })
+          .limit(20),
       ]);
 
       let teacherStudents: Row[] | null = students as Row[] | null;
       if (!teacherStudents) {
-        const { data: fb } = await supabase.from("students").select("id,first_name,last_initial,grade_level,class_id,parent_invite_code,card_code,is_active").order("first_name");
+        const { data: fb } = await supabase
+          .from("students")
+          .select(
+            "id,first_name,last_initial,grade_level,class_id,parent_invite_code,card_code,is_active",
+          )
+          .order("first_name");
         teacherStudents = fb as Row[] | null;
       }
 
@@ -598,11 +915,13 @@ export default async function PortalPage({
 
       const enrichedStudents = (teacherStudents ?? []).map((st) => {
         const cls = classById.get(st.class_id);
-        const schoolName = cls?.school_id ? schoolById.get(cls.school_id) : "Oak Grove Elementary";
+        const schoolName = cls?.school_id
+          ? schoolById.get(cls.school_id)
+          : "Oak Grove Elementary";
         return {
           ...st,
           class_name: cls?.name ?? "Kindergarten A",
-          school_name: schoolName ?? "Oak Grove Elementary"
+          school_name: schoolName ?? "Oak Grove Elementary",
         };
       });
 
@@ -612,7 +931,9 @@ export default async function PortalPage({
           let playbackUrl: string | null = null;
           if (rec.storage_path) {
             try {
-              const { data } = await supabase.storage.from("reading-recordings").createSignedUrl(rec.storage_path, 3600);
+              const { data } = await supabase.storage
+                .from("reading-recordings")
+                .createSignedUrl(rec.storage_path, 3600);
               playbackUrl = data?.signedUrl || null;
             } catch (_) {}
           }
@@ -620,12 +941,15 @@ export default async function PortalPage({
             playbackUrl = "/sample-reading-recording.wav";
           }
           return { ...rec, playback_url: playbackUrl };
-        })
+        }),
       );
 
       content = (
         <ParentPortalView
-          slug={currentSlug as "children" | "progress" | "recordings" | "leaderboard"}
+          slug={
+            currentSlug as
+              "children" | "progress" | "recordings" | "leaderboard"
+          }
           students={enrichedStudents}
           assignments={assignments ?? []}
           attempts={attempts ?? []}
@@ -635,7 +959,9 @@ export default async function PortalPage({
         />
       );
     } else {
-      content = <RoleSectionView role={role} slug={currentSlug} supabase={supabase} />;
+      content = (
+        <RoleSectionView role={role} slug={currentSlug} supabase={supabase} />
+      );
     }
   } else if (role === "teacher") {
     if (currentSlug === "library") {
@@ -654,16 +980,27 @@ export default async function PortalPage({
         { data: classes },
         { data: stores },
         { data: reviews },
-        { data: studentAssignments }
+        { data: studentAssignments },
       ] = await Promise.all([
-        supabase.from("missions").select("*").order("updated_at", { ascending: false }),
-        supabase.from("mission_attempts").select("*").order("started_at", { ascending: false }),
+        supabase
+          .from("missions")
+          .select("*")
+          .order("updated_at", { ascending: false }),
+        supabase
+          .from("mission_attempts")
+          .select("*")
+          .order("started_at", { ascending: false }),
         supabase.from("mission_assignments").select("*"),
-        supabase.from("students").select("id,first_name,last_initial,grade_level,class_id,avatar_url"),
+        supabase
+          .from("students")
+          .select("id,first_name,last_initial,grade_level,class_id,avatar_url"),
         supabase.from("classes").select("id,name,grade_level"),
         supabase.from("stores").select("id,name"),
-        supabase.from("mission_reviews").select("*").order("created_at", { ascending: false }),
-        supabase.from("mission_student_assignments").select("*")
+        supabase
+          .from("mission_reviews")
+          .select("*")
+          .order("created_at", { ascending: false }),
+        supabase.from("mission_student_assignments").select("*"),
       ]);
 
       content = (
@@ -677,6 +1014,30 @@ export default async function PortalPage({
           stores={stores ?? []}
           reviews={reviews ?? []}
           role="teacher"
+        />
+      );
+    } else if (currentSlug === "missions" && !requestedMissionId) {
+      const [{ data: missions }, { data: stores }, { data: classes }, { data: students }] =
+        await Promise.all([
+          supabase
+            .from("missions")
+            .select("id,title,mission_number,status,sharing_status")
+            .order("updated_at", { ascending: false }),
+          supabase.from("stores").select("id,name").order("name"),
+          supabase.from("classes").select("id,name,grade_level").order("name"),
+          supabase
+            .from("students")
+            .select("id,first_name,last_initial,grade_level,class_id")
+            .order("first_name"),
+        ]);
+
+      content = (
+        <MissionBuilderStartView
+          role="teacher"
+          missions={missions ?? []}
+          stores={stores ?? []}
+          classes={classes ?? []}
+          students={students ?? []}
         />
       );
     } else if (currentSlug === "missions") {
@@ -698,7 +1059,7 @@ export default async function PortalPage({
           estimated_minutes: 12,
           stars: 5,
           status: "draft",
-          sharing_status: "private"
+          sharing_status: "private",
         };
       } else {
         const { data: missions } = await supabase
@@ -716,7 +1077,7 @@ export default async function PortalPage({
           estimated_minutes: 12,
           stars: 5,
           status: "published",
-          sharing_status: "approved"
+          sharing_status: "approved",
         };
       }
 
@@ -729,17 +1090,40 @@ export default async function PortalPage({
         { data: classes },
         { data: reviews },
         { data: students },
-        { data: studentAssignments }
+        { data: studentAssignments },
       ] = await Promise.all([
-        supabase.from("missions").select("id,title,mission_number,status,sharing_status").order("updated_at", { ascending: false }),
-        supabase.from("mission_versions").select("id").eq("mission_id", mission.id).limit(1),
-        supabase.from("mission_products").select("*").eq("mission_id", mission.id).order("order_index"),
-        supabase.from("mission_assets").select("*").or(`mission_id.eq.${mission.id},mission_id.is.null`),
+        supabase
+          .from("missions")
+          .select("id,title,mission_number,status,sharing_status")
+          .order("updated_at", { ascending: false }),
+        supabase
+          .from("mission_versions")
+          .select("id")
+          .eq("mission_id", mission.id)
+          .limit(1),
+        supabase
+          .from("mission_products")
+          .select("*")
+          .eq("mission_id", mission.id)
+          .order("order_index"),
+        supabase
+          .from("mission_assets")
+          .select("*")
+          .or(`mission_id.eq.${mission.id},mission_id.is.null`),
         supabase.from("stores").select("id,name").order("name"),
         supabase.from("classes").select("id,name,grade_level").order("name"),
-        supabase.from("mission_reviews").select("*").eq("mission_id", mission.id).order("created_at", { ascending: false }),
-        supabase.from("students").select("id,first_name,last_initial,grade_level,class_id,avatar_url"),
-        supabase.from("mission_student_assignments").select("*").eq("mission_id", mission.id)
+        supabase
+          .from("mission_reviews")
+          .select("*")
+          .eq("mission_id", mission.id)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("students")
+          .select("id,first_name,last_initial,grade_level,class_id,avatar_url"),
+        supabase
+          .from("mission_student_assignments")
+          .select("*")
+          .eq("mission_id", mission.id),
       ]);
 
       const versionId = versions?.[0]?.id;
@@ -764,7 +1148,8 @@ export default async function PortalPage({
             .order("question_order");
 
           for (const q of questions ?? []) {
-            if (!questionsByStage[q.stage_id]) questionsByStage[q.stage_id] = [];
+            if (!questionsByStage[q.stage_id])
+              questionsByStage[q.stage_id] = [];
             questionsByStage[q.stage_id].push(q);
           }
         }
@@ -795,14 +1180,31 @@ export default async function PortalPage({
         { data: missions },
         { data: stores },
         { data: assignments },
-        { data: rewardGoals }
+        { data: rewardGoals },
       ] = await Promise.all([
-        supabase.from("classes").select("id,name,grade_level,school_year,reward_title,confirmed_stars,target_stars").order("grade_level"),
-        supabase.from("students").select("id,class_id,first_name,last_initial,grade_level,is_active"),
-        supabase.from("missions").select("id,title,grade_min,grade_max,status,sharing_status").order("title"),
+        supabase
+          .from("classes")
+          .select(
+            "id,name,grade_level,school_year,reward_title,confirmed_stars,target_stars",
+          )
+          .order("grade_level"),
+        supabase
+          .from("students")
+          .select("id,class_id,first_name,last_initial,grade_level,is_active"),
+        supabase
+          .from("missions")
+          .select("id,title,grade_min,grade_max,status,sharing_status")
+          .order("title"),
         supabase.from("stores").select("id,name").order("name"),
-        supabase.from("mission_assignments").select("id,class_id,mission_id,status,available_at,due_at,mission:missions(title)").order("created_at", { ascending: false }),
-        supabase.from("reward_goals").select("id,class_id,title,current_stars,target_stars,status")
+        supabase
+          .from("mission_assignments")
+          .select(
+            "id,class_id,mission_id,status,available_at,due_at,mission:missions(title)",
+          )
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("reward_goals")
+          .select("id,class_id,title,current_stars,target_stars,status"),
       ]);
 
       content = (
@@ -818,23 +1220,42 @@ export default async function PortalPage({
     } else if (currentSlug === "students") {
       content = <TeacherStudentManageView supabase={supabase} />;
     } else {
-      content = <RoleSectionView role={role} slug={currentSlug} supabase={supabase} />;
+      content = (
+        <RoleSectionView role={role} slug={currentSlug} supabase={supabase} />
+      );
     }
   } else if (role === "store") {
     if (currentSlug === "check-in") {
       content = <StoreCheckinView supabase={supabase} />;
     } else if (currentSlug === "products") {
       content = <StoreProductsView supabase={supabase} />;
-    } else if (["participation", "rewards", "profile", "notifications", "settings"].includes(currentSlug)) {
+    } else if (
+      [
+        "participation",
+        "rewards",
+        "profile",
+        "notifications",
+        "settings",
+      ].includes(currentSlug)
+    ) {
       content = (
         <StoreOperationsView
-          slug={currentSlug as "participation" | "rewards" | "profile" | "notifications" | "settings"}
+          slug={
+            currentSlug as
+              | "participation"
+              | "rewards"
+              | "profile"
+              | "notifications"
+              | "settings"
+          }
           supabase={supabase}
           profileName={access.profile.display_name}
         />
       );
     } else {
-      content = <RoleSectionView role={role} slug={currentSlug} supabase={supabase} />;
+      content = (
+        <RoleSectionView role={role} slug={currentSlug} supabase={supabase} />
+      );
     }
   } else {
     content = <SectionView role={role} slug={currentSlug} />;

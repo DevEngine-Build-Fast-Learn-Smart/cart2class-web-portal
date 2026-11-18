@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAnyRole } from "@/lib/permissions/access";
+import { requireAnyRole, requireRole } from "@/lib/permissions/access";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function toggleMissionStatus(formData: FormData) {
@@ -61,6 +61,99 @@ export async function toggleMissionStatus(formData: FormData) {
   revalidatePath("/admin/reviews");
   revalidatePath("/admin");
   return { success: true, status: newStatus };
+}
+
+/** Permanently removes a mission and its dependent learning records. Admin only. */
+export async function deleteMission(formData: FormData) {
+  const access = await requireRole("admin");
+  if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
+
+  const missionId = String(formData.get("missionId") ?? "").trim();
+  if (!missionId) return { error: "Mission ID is required." };
+
+  const adminClient = createAdminClient();
+  const { data: mission } = await adminClient
+    .from("missions")
+    .select("id,title")
+    .eq("id", missionId)
+    .maybeSingle();
+  if (!mission) return { error: "Mission not found or it has already been deleted." };
+
+  // Mission attempts reference both assignments and versions without a cascade.
+  // Remove their responses first so a real deletion cannot leave orphaned data.
+  const [{ data: versions }, { data: assignments }, { data: assets }] = await Promise.all([
+    adminClient.from("mission_versions").select("id").eq("mission_id", missionId),
+    adminClient.from("mission_assignments").select("id").eq("mission_id", missionId),
+    adminClient
+      .from("mission_assets")
+      .select("storage_bucket,storage_path")
+      .eq("mission_id", missionId),
+  ]);
+  const versionIds = (versions ?? []).map((version) => version.id);
+  const assignmentIds = (assignments ?? []).map((assignment) => assignment.id);
+  let attemptQuery = adminClient.from("mission_attempts").select("id");
+  if (versionIds.length) attemptQuery = attemptQuery.in("mission_version_id", versionIds);
+  else if (assignmentIds.length) attemptQuery = attemptQuery.in("assignment_id", assignmentIds);
+  const { data: attempts, error: attemptsReadError } = await attemptQuery;
+  if (attemptsReadError) return { error: attemptsReadError.message };
+
+  const attemptIds = (attempts ?? []).map((attempt) => attempt.id);
+  if (attemptIds.length) {
+    const { error: responseError } = await adminClient
+      .from("mission_responses")
+      .delete()
+      .in("attempt_id", attemptIds);
+    if (responseError) return { error: responseError.message };
+
+    const { error: attemptError } = await adminClient
+      .from("mission_attempts")
+      .delete()
+      .in("id", attemptIds);
+    if (attemptError) return { error: attemptError.message };
+  }
+
+  if (assignmentIds.length) {
+    const { error: assignmentError } = await adminClient
+      .from("mission_assignments")
+      .delete()
+      .in("id", assignmentIds);
+    if (assignmentError) return { error: assignmentError.message };
+  }
+
+  const { error: missionError } = await adminClient
+    .from("missions")
+    .delete()
+    .eq("id", missionId);
+  if (missionError) return { error: missionError.message };
+
+  // The database cascade removes the mission_assets rows. Remove their storage
+  // objects separately only after the database deletion succeeds.
+  const assetsByBucket = new Map<string, string[]>();
+  for (const asset of assets ?? []) {
+    if (!asset.storage_path) continue;
+    const bucket = asset.storage_bucket || "mission-assets";
+    assetsByBucket.set(bucket, [...(assetsByBucket.get(bucket) ?? []), asset.storage_path]);
+  }
+  await Promise.all(
+    [...assetsByBucket.entries()].map(([bucket, paths]) =>
+      adminClient.storage.from(bucket).remove(paths),
+    ),
+  );
+
+  await adminClient.from("audit_logs").insert({
+    actor_user_id: access.profile.id,
+    action: "mission.deleted",
+    entity_type: "mission",
+    entity_id: missionId,
+    metadata: { title: mission.title },
+  });
+
+  revalidatePath("/admin/library");
+  revalidatePath("/admin/missions");
+  revalidatePath("/admin/barcodes");
+  revalidatePath("/teacher/library");
+  revalidatePath("/teacher/missions");
+  return { success: true };
 }
 
 export async function cloneMission(formData: FormData) {

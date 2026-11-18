@@ -528,12 +528,14 @@ export function BarcodeExportButton({
   value,
   label,
   subtitle,
-  symbology = "CODE128"
+  symbology = "CODE128",
+  compact = false
 }: {
   value: string;
   label: string;
   subtitle: string;
   symbology?: "CODE128" | "EAN13" | "UPC";
+  compact?: boolean;
 }) {
   const [image, setImage] = useState<string | null>(null);
   const code: IssuedCode = { payload: value, label, subtitle, expiresAt: null, reference: `${symbology}: ${value}` };
@@ -567,9 +569,13 @@ export function BarcodeExportButton({
   const filename = safeName(label);
 
   return (
-    <div className="rounded-2xl border bg-slate-50/80 p-3 shadow-xs">
-      <img src={image} alt={`Barcode ${value}`} className="w-full bg-white rounded-lg p-2 border" />
-      <div className="mt-2 flex flex-wrap gap-1.5 justify-end">
+    <div className={`rounded-2xl border bg-slate-50/80 shadow-xs ${compact ? "p-2" : "p-3"}`}>
+      <img
+        src={image}
+        alt={`Barcode ${value}`}
+        className={compact ? "h-28 w-full rounded-lg border bg-white object-contain p-1" : "w-full rounded-lg border bg-white p-2"}
+      />
+      <div className={`flex flex-wrap justify-end gap-1.5 ${compact ? "mt-1.5" : "mt-2"}`}>
         <Button type="button" variant="secondary" className="h-7 px-2 text-[11px] font-bold" onClick={() => download(image, `${filename}.png`)}>
           <Download className="mr-1 h-3 w-3" />PNG
         </Button>

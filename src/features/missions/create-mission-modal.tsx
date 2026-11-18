@@ -724,6 +724,16 @@ export function CreateMissionModal({
                 </div>
               )}
 
+              {role === "admin" && (
+                <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4 text-xs">
+                  <div className="flex items-center gap-2 font-black text-blue-950">
+                    <ClipboardCheck className="h-4 w-4 text-brand" />
+                    Administrator workflow
+                  </div>
+                  <p className="mt-1.5 leading-relaxed text-blue-900">Your new mission opens as a private draft. Complete the learning content, then use <strong>Approve &amp; Publish</strong> in the builder when it is ready for students. You can discard the draft instead—no review or rejection step is needed.</p>
+                </div>
+              )}
+
               {/* Modal Footer Buttons */}
               <div className="border-t pt-4 flex items-center justify-end gap-3">
                 <Button

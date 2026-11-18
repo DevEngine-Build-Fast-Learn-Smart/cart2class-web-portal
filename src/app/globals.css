@@ -6,12 +6,15 @@
 @layer base {
   * { @apply border-line; }
   html { @apply bg-canvas text-[16px] scroll-smooth; }
-  body { @apply min-h-screen bg-canvas font-sans text-ink antialiased; }
+  body { @apply min-h-screen overflow-x-hidden bg-canvas font-sans text-ink antialiased; }
   button, a, input, select, textarea { @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2; }
 }
 
 @layer components {
-  .page-shell { @apply mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10 space-y-6; }
+  /* Portal workspaces are intentionally allowed to use the available desktop width.
+     Each page keeps responsive gutters, while dense views can grow without creating
+     a narrow central column and unnecessary table scrolling. */
+  .page-shell { @apply mx-auto w-full min-w-0 max-w-none px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10 2xl:px-10 space-y-6; }
   .panel { @apply rounded-2xl border bg-white shadow-sm transition-shadow; }
   .eyebrow { @apply text-xs font-bold uppercase tracking-[.18em] text-muted; }
   .metric-value { @apply text-3xl sm:text-4xl font-black tracking-tight text-ink; }

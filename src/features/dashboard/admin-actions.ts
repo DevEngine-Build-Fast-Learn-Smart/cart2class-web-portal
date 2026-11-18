@@ -8,6 +8,72 @@ import crypto from "crypto";
 
 const refresh = (...paths: string[]) => paths.forEach((path) => revalidatePath(path));
 
+async function validateTeacherClassroom(
+  adminClient: ReturnType<typeof createAdminClient>,
+  classId: string | null,
+  schoolId: string | null,
+) {
+  if (!classId || !schoolId) return { error: "Teachers must be assigned to a school and classroom." };
+  const { data: classroom, error } = await adminClient
+    .from("classes")
+    .select("id,school_id,is_active")
+    .eq("id", classId)
+    .maybeSingle();
+  if (error || !classroom?.is_active || classroom.school_id !== schoolId) {
+    return { error: "Choose an active classroom that belongs to the selected school." };
+  }
+  return { classroom };
+}
+
+async function validateActiveParent(
+  adminClient: ReturnType<typeof createAdminClient>,
+  parentUserId: string,
+) {
+  const { data, error } = await adminClient
+    .from("role_memberships")
+    .select("user_id")
+    .eq("user_id", parentUserId)
+    .eq("role", "parent")
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error || !data) {
+    return { error: "Choose an active parent or guardian account." };
+  }
+  return { success: true };
+}
+
+async function syncStoreSchoolPartnerships(
+  adminClient: ReturnType<typeof createAdminClient>,
+  storeId: string,
+  schoolIds: string[],
+) {
+  const uniqueSchoolIds = [...new Set(schoolIds.filter(Boolean))];
+  if (!uniqueSchoolIds.length) return { error: "Choose at least one partner school for this store." };
+
+  const { data: schools, error: schoolsError } = await adminClient
+    .from("schools")
+    .select("id,is_active")
+    .in("id", uniqueSchoolIds);
+  if (schoolsError || schools?.length !== uniqueSchoolIds.length || schools.some((school) => !school.is_active)) {
+    return { error: "Every selected partner school must be active." };
+  }
+
+  const { error: deactivateError } = await adminClient
+    .from("school_store_partnerships")
+    .update({ is_active: false })
+    .eq("store_id", storeId);
+  if (deactivateError) return { error: deactivateError.message };
+
+  const { error: partnershipError } = await adminClient
+    .from("school_store_partnerships")
+    .upsert(
+      uniqueSchoolIds.map((schoolId) => ({ school_id: schoolId, store_id: storeId, is_active: true })),
+      { onConflict: "school_id,store_id" },
+    );
+  return partnershipError ? { error: partnershipError.message } : { success: true };
+}
+
 export async function createPortalUser(formData: FormData) {
   const access = await requireRole("admin");
   if (access.unavailable || !access.supabase) return { error: "Unauthorized" };
@@ -17,6 +83,7 @@ export async function createPortalUser(formData: FormData) {
   const displayName = String(formData.get("displayName") ?? "").trim();
   const role = String(formData.get("role") ?? "parent") as "parent" | "teacher" | "store" | "admin";
   const classId = String(formData.get("classId") ?? "").trim() || null;
+  const schoolId = String(formData.get("schoolId") ?? "").trim() || null;
   const storeId = String(formData.get("storeId") ?? "").trim() || null;
   const studentId = String(formData.get("studentId") ?? "").trim() || null;
   const avatarFile = formData.get("avatarFile") as File | null;
@@ -39,6 +106,12 @@ export async function createPortalUser(formData: FormData) {
   const finalAvatarUrl = imgRes.url || null;
 
   const adminClient = createAdminClient();
+
+  if (role === "teacher") {
+    const validation = await validateTeacherClassroom(adminClient, classId, schoolId);
+    if (validation.error) return validation;
+  }
+  if (role === "store" && !storeId) return { error: "Choose the store branch for this partner account." };
 
   // 1. Get or create organization
   const { data: orgs } = await adminClient.from("organizations").select("id").limit(1);
@@ -145,6 +218,10 @@ export async function updatePortalUser(formData: FormData) {
   const displayName = String(formData.get("displayName") ?? "").trim();
   const status = String(formData.get("accountStatus") ?? "active") as "active" | "disabled";
   const newPassword = String(formData.get("newPassword") ?? "").trim();
+  const role = String(formData.get("role") ?? "").trim();
+  const classId = String(formData.get("classId") ?? "").trim() || null;
+  const schoolId = String(formData.get("schoolId") ?? "").trim() || null;
+  const storeId = String(formData.get("storeId") ?? "").trim() || null;
   const avatarFile = formData.get("avatarFile") as File | null;
   const avatarUrl = String(formData.get("avatarUrl") ?? "").trim();
 
@@ -161,6 +238,28 @@ export async function updatePortalUser(formData: FormData) {
   const finalAvatarUrl = imgRes.url !== undefined ? imgRes.url : undefined;
 
   const adminClient = createAdminClient();
+
+  if (role === "teacher") {
+    const validation = await validateTeacherClassroom(adminClient, classId, schoolId);
+    if (validation.error) return validation;
+    await adminClient.from("teacher_class_assignments").update({ is_active: false }).eq("teacher_user_id", userId);
+    const { error: assignmentError } = await adminClient.from("teacher_class_assignments").upsert({
+      teacher_user_id: userId,
+      class_id: classId,
+      is_active: true,
+    }, { onConflict: "teacher_user_id,class_id" });
+    if (assignmentError) return { error: assignmentError.message };
+  }
+  if (role === "store") {
+    if (!storeId) return { error: "Choose the store branch for this partner account." };
+    await adminClient.from("store_memberships").update({ is_active: false }).eq("user_id", userId);
+    const { error: membershipError } = await adminClient.from("store_memberships").upsert({
+      user_id: userId,
+      store_id: storeId,
+      is_active: true,
+    }, { onConflict: "user_id,store_id" });
+    if (membershipError) return { error: membershipError.message };
+  }
 
   if (displayName || status || finalAvatarUrl !== undefined) {
     const updatePayload: Record<string, any> = {
@@ -248,6 +347,7 @@ export async function createAdminStudent(formData: FormData) {
   const lastInitial = String(formData.get("lastInitial") ?? "").trim().toUpperCase() || null;
   const gradeLevel = Number(formData.get("gradeLevel") ?? 0);
   const classId = String(formData.get("classId") ?? "").trim();
+  const parentUserId = String(formData.get("parentUserId") ?? "").trim() || null;
   const avatarFile = formData.get("avatarFile") as File | null;
   const avatarUrl = String(formData.get("avatarUrl") ?? "").trim();
 
@@ -267,6 +367,11 @@ export async function createAdminStudent(formData: FormData) {
   }
 
   const adminClient = createAdminClient();
+
+  if (parentUserId) {
+    const parentValidation = await validateActiveParent(adminClient, parentUserId);
+    if (parentValidation.error) return parentValidation;
+  }
 
   // Get school and org from class
   const { data: cls } = await adminClient.from("classes").select("school_id, schools:school_id(organization_id)").eq("id", classId).single();
@@ -314,6 +419,16 @@ export async function createAdminStudent(formData: FormData) {
     token_hash: tokenHash,
     is_active: true
   });
+
+  if (parentUserId) {
+    const { error: parentLinkError } = await adminClient.from("parent_student_relationships").upsert({
+      parent_user_id: parentUserId,
+      student_id: newStudent.id,
+      relationship_label: "Parent/Guardian",
+      is_active: true,
+    }, { onConflict: "parent_user_id,student_id" });
+    if (parentLinkError) return { error: parentLinkError.message };
+  }
 
   // Record audit log
   await adminClient.from("audit_logs").insert({
@@ -469,6 +584,7 @@ export async function createStore(formData: FormData) {
   const address = String(formData.get("address") ?? "").trim();
   const businessHours = String(formData.get("businessHours") ?? "").trim();
   const representativeName = String(formData.get("representativeName") ?? "").trim();
+  const schoolIds = formData.getAll("schoolIds").map(String).map((value) => value.trim()).filter(Boolean);
   const logoFile = formData.get("logoFile") as File | null;
   const logoUrl = String(formData.get("logoUrl") ?? "").trim();
 
@@ -513,6 +629,11 @@ export async function createStore(formData: FormData) {
   if (storeErr) return { error: storeErr.message };
 
   if (newStore) {
+    const partnershipResult = await syncStoreSchoolPartnerships(adminClient, newStore.id, schoolIds);
+    if (partnershipResult.error) {
+      await adminClient.from("stores").delete().eq("id", newStore.id);
+      return partnershipResult;
+    }
     // Generate check-in code
     const tokenHash = crypto.randomBytes(16).toString("hex");
     await adminClient.from("store_checkin_codes").insert({
@@ -705,6 +826,7 @@ export async function updateStore(formData: FormData) {
   const address = String(formData.get("address") ?? "").trim();
   const businessHours = String(formData.get("businessHours") ?? "").trim();
   const representativeName = String(formData.get("representativeName") ?? "").trim();
+  const schoolIds = formData.getAll("schoolIds").map(String).map((value) => value.trim()).filter(Boolean);
   const isActive = formData.get("isActive") === "true" || formData.get("isActive") === "on";
   const logoFile = formData.get("logoFile") as File | null;
   const logoUrl = String(formData.get("logoUrl") ?? "").trim();
@@ -744,6 +866,9 @@ export async function updateStore(formData: FormData) {
   }
 
   if (error) return { error: error.message };
+
+  const partnershipResult = await syncStoreSchoolPartnerships(adminClient, storeId, schoolIds);
+  if (partnershipResult.error) return partnershipResult;
 
   // Record audit log
   await adminClient.from("audit_logs").insert({
@@ -803,11 +928,20 @@ export async function updateAdminStudent(formData: FormData) {
   }
 
   const adminClient = createAdminClient();
+  const { data: classroom, error: classroomError } = await adminClient
+    .from("classes")
+    .select("school_id,is_active")
+    .eq("id", classId)
+    .maybeSingle();
+  if (classroomError || !classroom?.is_active) {
+    return { error: "Choose an active classroom for this learner." };
+  }
   const updatePayload: Record<string, any> = {
     first_name: firstName,
     last_initial: lastInitial,
     grade_level: gradeLevel,
     class_id: classId,
+    school_id: classroom.school_id,
     updated_at: new Date().toISOString()
   };
   if (imgRes.url !== undefined) {
@@ -848,17 +982,20 @@ export async function linkStudentToParent(formData: FormData) {
 
   const studentId = String(formData.get("studentId") ?? "").trim();
   const parentUserId = String(formData.get("parentUserId") ?? "").trim();
+  const relationshipLabel = String(formData.get("relationshipLabel") ?? "Parent/Guardian").trim() || "Parent/Guardian";
 
   if (!studentId || !parentUserId) {
     return { error: "Student and parent user are required." };
   }
 
   const adminClient = createAdminClient();
+  const parentValidation = await validateActiveParent(adminClient, parentUserId);
+  if (parentValidation.error) return parentValidation;
   const { error } = await adminClient.from("parent_student_relationships").upsert(
     {
       student_id: studentId,
       parent_user_id: parentUserId,
-      relationship_label: "Parent/Guardian",
+      relationship_label: relationshipLabel.slice(0, 80),
       is_active: true
     },
     { onConflict: "parent_user_id,student_id" }

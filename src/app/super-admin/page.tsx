@@ -1,19 +1,19 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { RoleLoginView } from "@/features/authentication/role-login-view";
-import { roleHome } from "@/lib/constants/roles";
+import { RoleAccountSwitchView } from "@/features/authentication/role-account-switch-view";
 import type { Role } from "@/types/domain";
 
 export const metadata = {
   title: "Super Admin Sign In | Cart2Class A.L.M.A. Portal",
-  description: "A.L.M.A. Super Admin & District Governance login"
+  description: "A.L.M.A. Super Admin & District Governance login",
 };
 
 export default async function SuperAdminLoginPage() {
   const supabase = await createClient();
   if (supabase) {
     const {
-      data: { user }
+      data: { user },
     } = await supabase.auth.getUser();
 
     if (user) {
@@ -27,12 +27,15 @@ export default async function SuperAdminLoginPage() {
       if (roles.includes("admin")) {
         redirect("/admin");
       }
-      if (roles.length > 0) {
-        redirect(roleHome[roles[0]] as never);
-      }
+      return (
+        <RoleAccountSwitchView
+          targetRole="admin"
+          currentRoles={roles}
+          email={user.email}
+        />
+      );
     }
   }
 
   return <RoleLoginView role="admin" />;
 }
-

@@ -56,6 +56,7 @@ import { OptionPictureManager } from "./option-picture-manager";
 import { CreateMissionModal } from "./create-mission-modal";
 import { ManageStudentAccessModal } from "./manage-student-access-modal";
 import { EditMissionScheduleModal } from "./edit-mission-schedule-modal";
+import { deleteMission } from "./mission-library-actions";
 import {
   saveStage1Question,
   deleteStage1Question,
@@ -64,7 +65,8 @@ import {
   saveStage3Reading,
   saveStage4Math,
   deleteStage4Math,
-  uploadMissionAsset
+  uploadMissionAsset,
+  deleteMissionAsset
 } from "@/features/dashboard/mission-builder-actions";
 import { submitMission, reviewMission } from "@/features/dashboard/workflow-actions";
 
@@ -139,15 +141,38 @@ export function MissionBuilderView({
   const [uploadSelectedFile, setUploadSelectedFile] = useState<File | null>(null);
   const [uploadStageKey, setUploadStageKey] = useState<string>("phonemic_awareness");
   const [isUploadingAsset, setIsUploadingAsset] = useState(false);
+  const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   // Admin Review & Teacher Submission state
   const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [rejectFeedbackText, setRejectFeedbackText] = useState("");
   const [isReviewSubmitting, setIsReviewSubmitting] = useState(false);
   const [reviewAlert, setReviewAlert] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const latestReview = reviews.find((r) => r.mission_id === mission.id) || reviews[0];
+
+  const handleDeleteAsset = async (asset: Row) => {
+    if (!window.confirm(`Delete “${asset.file_name || "this media asset"}”? This permanently removes the file from the mission library and storage.`)) return;
+
+    setDeletingAssetId(asset.id);
+    try {
+      const formData = new FormData();
+      formData.append("missionId", mission.id);
+      formData.append("assetId", asset.id);
+      const result = await deleteMissionAsset(formData);
+      if (result?.error) setUploadStatus({ type: "error", message: result.error });
+      else {
+        setUploadStatus({ type: "success", message: `Deleted “${asset.file_name || "media asset"}” from storage and the Media Library.` });
+        router.refresh();
+      }
+    } catch {
+      setUploadStatus({ type: "error", message: "The media asset could not be deleted. Please try again." });
+    } finally {
+      setDeletingAssetId(null);
+    }
+  };
 
   const handleAdminApprove = async () => {
     setIsReviewSubmitting(true);
@@ -196,6 +221,26 @@ export function MissionBuilderView({
       }
     } catch (err: any) {
       setReviewAlert({ type: "error", message: err.message || "Failed to reject mission." });
+    } finally {
+      setIsReviewSubmitting(false);
+    }
+  };
+
+  const handleDiscardDraft = async () => {
+    setIsReviewSubmitting(true);
+    setReviewAlert(null);
+    try {
+      const formData = new FormData();
+      formData.append("missionId", mission.id);
+      const result = await deleteMission(formData);
+      if ("error" in result) {
+        setReviewAlert({ type: "error", message: result.error || "The draft could not be discarded." });
+        return;
+      }
+      router.push("/admin/library");
+      router.refresh();
+    } catch {
+      setReviewAlert({ type: "error", message: "The draft could not be discarded. Please try again." });
     } finally {
       setIsReviewSubmitting(false);
     }
@@ -366,7 +411,7 @@ export function MissionBuilderView({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
+      <div className="rounded-2xl border border-line bg-white p-5 shadow-xs">
         <Link
           href={`/${role}/library`}
           className="inline-flex items-center gap-1.5 text-xs font-bold text-muted hover:text-navy transition mb-3"
@@ -426,7 +471,7 @@ export function MissionBuilderView({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <CreateMissionModal
               role={role}
               stores={stores}
@@ -486,15 +531,27 @@ export function MissionBuilderView({
                   {isReviewSubmitting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
                   {mission.status === "published" ? "Approved & Live" : "Approve & Publish"}
                 </Button>
-                <Button
-                  type="button"
-                  variant="danger"
-                  onClick={() => setShowRejectDialog(true)}
-                  disabled={isReviewSubmitting}
-                  className="bg-rose-600 hover:bg-rose-700 text-white font-bold h-10 px-3.5 text-xs shadow-xs"
-                >
-                  <X className="mr-1.5 h-3.5 w-3.5" /> Reject with Feedback
-                </Button>
+                {(mission.sharing_status === "submitted" || mission.sharing_status === "under_review") ? (
+                  <Button
+                    type="button"
+                    variant="danger"
+                    onClick={() => setShowRejectDialog(true)}
+                    disabled={isReviewSubmitting}
+                    className="bg-rose-600 hover:bg-rose-700 text-white font-bold h-10 px-3.5 text-xs shadow-xs"
+                  >
+                    <X className="mr-1.5 h-3.5 w-3.5" /> Reject with Feedback
+                  </Button>
+                ) : mission.status !== "published" ? (
+                  <Button
+                    type="button"
+                    variant="danger"
+                    onClick={() => setShowDiscardDialog(true)}
+                    disabled={isReviewSubmitting}
+                    className="bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 font-bold h-10 px-3.5 text-xs shadow-xs"
+                  >
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Discard Draft
+                  </Button>
+                ) : null}
               </div>
             )}
 
@@ -1382,7 +1439,7 @@ export function MissionBuilderView({
                 <h3 className="text-2xl font-black text-navy leading-tight">Mission Media Library</h3>
               </div>
               <p className="text-xs text-muted mt-1 max-w-2xl">
-                All educational audio narrations (M4A/MP3) and picture cards (SVG/PNG) bundled for student tablets. Every file is validated with SHA-256 for 100% reliable offline sync.
+                This mission&apos;s educational audio narrations (M4A/MP3) and picture cards (SVG/PNG) are retained in secure media storage until an authorized user deletes them. Every file is validated with SHA-256 for reliable offline sync.
               </p>
             </div>
 
@@ -1786,6 +1843,17 @@ export function MissionBuilderView({
                               <ExternalLink className="h-3 w-3" />
                             </a>
                           )}
+                          {a.mission_id === mission.id && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteAsset(a)}
+                              disabled={deletingAssetId === a.id}
+                              className="p-1 text-slate-400 transition hover:text-rose-600 disabled:cursor-wait disabled:opacity-50"
+                              title={`Delete ${cleanName}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -1915,6 +1983,17 @@ export function MissionBuilderView({
                                   >
                                     View <ExternalLink className="h-3 w-3" />
                                   </a>
+                                )}
+                                {a.mission_id === mission.id && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteAsset(a)}
+                                    disabled={deletingAssetId === a.id}
+                                    className="p-1 text-slate-400 transition hover:text-rose-600 disabled:cursor-wait disabled:opacity-50"
+                                    title={`Delete ${cleanName}`}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
                                 )}
                               </div>
                             )}
@@ -2879,6 +2958,30 @@ export function MissionBuilderView({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Admin draft discard dialog */}
+      {showDiscardDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-2xl border border-rose-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-rose-50 text-rose-700">
+                <Trash2 className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-navy">Discard this draft?</h3>
+                <p className="mt-1 text-xs leading-5 text-muted">This permanently removes <strong className="text-ink">{mission.title}</strong> and its draft questions, products, assignments, and uploaded media. This cannot be undone.</p>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-2 border-t pt-4">
+              <Button type="button" variant="secondary" disabled={isReviewSubmitting} onClick={() => setShowDiscardDialog(false)} className="h-10 px-4 text-xs font-bold">Keep editing</Button>
+              <Button type="button" disabled={isReviewSubmitting} onClick={handleDiscardDraft} className="h-10 bg-rose-600 px-4 text-xs font-bold text-white hover:bg-rose-700">
+                {isReviewSubmitting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-1.5 h-3.5 w-3.5" />}
+                Discard draft
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 

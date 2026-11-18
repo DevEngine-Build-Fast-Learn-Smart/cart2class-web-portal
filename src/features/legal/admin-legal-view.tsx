@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { publishPolicyVersion, savePolicyVersion, updateDeletionRequest } from "./actions";
+import { publishPolicyVersion, savePolicyVersion, updateDeletionRequest, updatePolicyVersion } from "./actions";
 
 const formatDate = (value: string | null) =>
   value
@@ -181,11 +181,53 @@ export async function AdminLegalView({
                           </div>
                           <Badge>{version.status}</Badge>
                         </div>
-                        <details className="mt-3">
-                          <summary className="cursor-pointer text-xs font-bold text-brand">View content markdown</summary>
-                          <div className="mt-2 whitespace-pre-wrap rounded-lg bg-white p-3 text-xs leading-6 text-slate-700 border">
+                        <div className="mt-3 overflow-hidden rounded-xl border bg-white">
+                          <div className="flex items-center justify-between border-b bg-slate-50 px-3 py-2">
+                            <p className="text-xs font-extrabold text-navy">
+                              {version.status === "published" ? "Published content" : "Draft content"}
+                            </p>
+                            <span className="text-[11px] font-medium text-muted">Markdown</span>
+                          </div>
+                          <div className="max-h-80 overflow-y-auto whitespace-pre-wrap p-3 text-sm leading-6 text-slate-700">
                             {version.content_markdown}
                           </div>
+                        </div>
+                        <details className="mt-3 rounded-xl border bg-white p-3">
+                          <summary className="cursor-pointer text-sm font-bold text-brand">
+                            {version.status === "published" ? "Edit as a new draft update" : "Edit this draft"}
+                          </summary>
+                          <form
+                            action={version.status === "published" ? savePolicyVersion : updatePolicyVersion}
+                            className="mt-3 grid gap-3"
+                          >
+                            {version.status === "published" ? (
+                              <input type="hidden" name="documentId" value={document.id} />
+                            ) : (
+                              <input type="hidden" name="versionId" value={version.id} />
+                            )}
+                            <label className="text-xs font-bold text-navy">
+                              Title
+                              <input
+                                required
+                                name="title"
+                                defaultValue={version.title}
+                                className="mt-1 block h-10 w-full rounded-lg border bg-white px-3 font-normal text-sm"
+                              />
+                            </label>
+                            <label className="text-xs font-bold text-navy">
+                              Content
+                              <textarea
+                                required
+                                name="content"
+                                defaultValue={version.content_markdown}
+                                rows={12}
+                                className="mt-1 block w-full rounded-lg border bg-white p-3 font-normal text-sm leading-6"
+                              />
+                            </label>
+                            <button className="w-fit rounded-lg border border-brand px-3 py-2 text-xs font-bold text-brand transition hover:bg-blue-50">
+                              {version.status === "published" ? "Save updated draft" : "Update draft"}
+                            </button>
+                          </form>
                         </details>
                         {version.status !== "published" && (
                           <form action={publishPolicyVersion} className="mt-3">

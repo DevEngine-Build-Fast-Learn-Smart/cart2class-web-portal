@@ -3,56 +3,35 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Bell, User, Upload, Link2, X, Check, AlertCircle, Shield, Mail, ArrowUpRight } from "lucide-react";
+import { Bell, User, Upload, Link2, X, Check, AlertCircle, Shield, Mail, ChevronDown, Sparkles } from "lucide-react";
 import { roleAccents, roleLabels } from "@/lib/constants/roles";
 import type { Profile, Role } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { updateMyProfile } from "@/features/authentication/profile-actions";
 
-const headerNav: Record<Role, { name: string; href: string }[]> = {
+const quickActions: Record<Role, { label: string; href: string }[]> = {
   admin: [
-    { name: "Overview", href: "/admin" },
-    { name: "Schools", href: "/admin/schools" },
-    { name: "Users", href: "/admin/users" },
-    { name: "Stores", href: "/admin/stores" },
-    { name: "Missions", href: "/admin/missions" },
-    { name: "QR & Barcodes", href: "/admin/barcodes" },
-    { name: "Library", href: "/admin/library" },
-    { name: "Reports", href: "/admin/reports" }
+    { label: "Add school or class", href: "/admin/schools" },
+    { label: "Enroll student", href: "/admin/users" },
+    { label: "Add partner store", href: "/admin/stores" },
+    { label: "Build a mission", href: "/admin/missions?tab=builder" }
   ],
   teacher: [
-    { name: "Overview", href: "/teacher" },
-    { name: "Classes", href: "/teacher/classes" },
-    { name: "Students", href: "/teacher/students" },
-    { name: "Missions", href: "/teacher/missions" },
-    { name: "QR & Barcodes", href: "/teacher/barcodes" },
-    { name: "Library", href: "/teacher/library" },
-    { name: "Reviews", href: "/teacher/recordings" }
+    { label: "Add student", href: "/teacher/students" },
+    { label: "Manage classes", href: "/teacher/classes" },
+    { label: "Build a mission", href: "/teacher/missions" },
+    { label: "Open QR cards", href: "/teacher/barcodes" }
   ],
   parent: [
-    { name: "Overview", href: "/parent" },
-    { name: "Children", href: "/parent/children" },
-    { name: "Progress", href: "/parent/progress" },
-    { name: "Leaderboard", href: "/parent/leaderboard" },
-    { name: "Recordings", href: "/parent/recordings" }
+    { label: "Link a child", href: "/parent/children" },
+    { label: "View mission progress", href: "/parent/progress" },
+    { label: "Open recordings", href: "/parent/recordings" }
   ],
   store: [
-    { name: "Overview", href: "/store" },
-    { name: "Check-in", href: "/store/check-in" },
-    { name: "QR & Barcodes", href: "/store/barcodes" },
-    { name: "Products", href: "/store/products" },
-    { name: "Participation", href: "/store/participation" },
-    { name: "Rewards", href: "/store/rewards" },
-    { name: "Profile", href: "/store/profile" }
+    { label: "Scan a check-in QR", href: "/store/check-in" },
+    { label: "Manage products", href: "/store/products" },
+    { label: "Open store QR codes", href: "/store/barcodes" }
   ]
-};
-
-const roleCta: Record<Role, { label: string; href: string }> = {
-  admin: { label: "+ Add Record ↗", href: "/admin/schools" },
-  teacher: { label: "+ Add Student ↗", href: "/teacher/students" },
-  parent: { label: "+ Link Child ↗", href: "/parent/children" },
-  store: { label: "Scan QR ↗", href: "/store/check-in" }
 };
 
 export function PortalHeaderActions({
@@ -62,9 +41,9 @@ export function PortalHeaderActions({
   role: Role;
   profile: Profile;
 }) {
-  const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const [showQuickActions, setShowQuickActions] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [displayName, setDisplayName] = useState(profile.display_name);
   const [avatarUrl, setAvatarUrl] = useState(profile.avatar_url || "");
@@ -113,52 +92,47 @@ export function PortalHeaderActions({
     }
   };
 
-  const tabs = headerNav[role] || [];
-  const cta = roleCta[role];
+  const actions = quickActions[role];
 
   return (
-    <div className="flex flex-1 items-center justify-between gap-3 min-w-0">
-      {/* Center Segmented Capsule Navigation (DevEngine Style) */}
-      <nav
-        aria-label="Quick navigation"
-        className="hidden md:flex items-center gap-1 rounded-full border border-slate-200/70 bg-slate-100/80 p-1 shadow-inner mx-auto max-w-2xl overflow-x-auto scrollbar-none"
-      >
-        {tabs.map((tab) => {
-          const isActive =
-            tab.href.split("/").length === 2
-              ? pathname === tab.href
-              : pathname === tab.href || pathname.startsWith(`${tab.href}/`);
-
-          return (
-            <Link
-              key={tab.href}
-              href={tab.href}
-              className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition whitespace-nowrap ${
-                isActive
-                  ? "bg-cyan-50 font-black text-cyan-950 border border-cyan-300/80 shadow-xs"
-                  : "text-slate-600 hover:text-navy hover:bg-white/70"
-              }`}
-            >
-              {isActive && (
-                <span className="h-1.5 w-1.5 rounded-full bg-cyan-500 animate-pulse" />
-              )}
-              <span>{tab.name}</span>
-            </Link>
-          );
-        })}
-      </nav>
-
-      {/* Right Controls: Cyan Pill CTA + Bell + Avatar (DevEngine Style) */}
+    <div className="flex flex-1 items-center justify-end gap-3 min-w-0">
+      {/* Role-specific quick action, notifications, and profile controls. Navigation lives in the sidebar. */}
       <div className="ml-auto flex items-center gap-2.5 sm:gap-3 shrink-0">
-        {/* Vibrant Cyan Pill Button (Matching "Build Together ↗") */}
-        {cta && (
-          <Link
-            href={cta.href}
-            className="hidden sm:inline-flex items-center gap-1 rounded-full bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-xs px-4 py-2 shadow-[0_4px_14px_rgba(6,182,212,0.35)] transition hover:scale-105 active:scale-95"
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setShowQuickActions((open) => !open)}
+            aria-haspopup="menu"
+            aria-expanded={showQuickActions}
+            className="inline-flex h-10 items-center gap-1.5 rounded-full bg-cyan-400 px-3 text-xs font-black text-slate-950 shadow-[0_4px_14px_rgba(6,182,212,0.35)] transition hover:scale-105 hover:bg-cyan-300 active:scale-95 sm:px-4"
           >
-            <span>{cta.label}</span>
-          </Link>
-        )}
+            <Sparkles className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Quick actions</span>
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showQuickActions ? "rotate-180" : ""}`} />
+          </button>
+          {showQuickActions && (
+            <div
+              role="menu"
+              className="absolute right-0 top-[calc(100%+0.65rem)] z-50 w-60 overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/15"
+            >
+              <p className="px-2.5 pb-1.5 pt-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+                {roleLabels[role]} shortcuts
+              </p>
+              {actions.map((action) => (
+                <Link
+                  key={action.href}
+                  href={action.href}
+                  role="menuitem"
+                  onClick={() => setShowQuickActions(false)}
+                  className="flex items-center justify-between rounded-xl px-2.5 py-2 text-sm font-bold text-navy transition hover:bg-cyan-50 hover:text-cyan-950"
+                >
+                  {action.label}
+                  <span aria-hidden="true" className="text-cyan-600">→</span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Circular Notification Bell Button */}
         <button
